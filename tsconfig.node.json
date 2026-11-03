@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "types": ["node", "@cloudflare/workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "shared/**/*.ts",
+    "src/**/*.ts",
+    "tests/self-hosted/server.test.ts",
+    "tests/self-hosted/platform-config.test.ts",
+    "tests/self-hosted/sqlite-server.test.ts",
+    "tests/platform/**/*.ts",
+    "tests/support/**/*.ts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": []
+}

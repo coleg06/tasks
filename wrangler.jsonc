@@ -1,0 +1,39 @@
+{
+  // Neutral template. A deployment repository supplies its own copy with real names, account
+  // bindings, routes and database identifiers.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tasks-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*", "/mcp", "/ws", "/healthz", "/readyz"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tasks-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "EVENT_ASSETS",
+      "bucket_name": "tasks-assets-local"
+    }
+  ],
+  "observability": { "enabled": true },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "FEATURE_MODULES": "tasks,projects,events,workflows",
+    "RELEASE_SHA": "local"
+  },
+  "env": {
+    "dev": { "name": "tasks-dev" },
+    "production": { "name": "tasks" }
+  }
+}

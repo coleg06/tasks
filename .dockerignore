@@ -1,0 +1,12 @@
+.git
+.github
+coverage
+dist
+node_modules
+.npm
+web/dist
+*.log
+.dev.vars*
+.env*
+data
+examples

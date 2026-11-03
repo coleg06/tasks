@@ -1,0 +1,15 @@
+node_modules/
+dist/
+web/dist/
+coverage/
+.wrangler/
+.wrangler-*.json
+.npm/
+*.log
+*.tsbuildinfo
+.dev.vars*
+.env*
+data/
+*.db
+*.db-shm
+*.db-wal

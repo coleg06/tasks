@@ -1,0 +1,33 @@
+# Tasks behind oauth2-proxy. Only the proxy publishes a port; the application is reachable on the
+# internal network alone, which is what TASKS_TRUSTED_UPSTREAM_TRUST acknowledges.
+#   cp tasks.env.example tasks.env && cp oauth2-proxy.cfg.example oauth2-proxy.cfg  # then edit both
+#   docker compose up --build
+# Put TLS termination in front of the proxy for production (the redirect URL must be https).
+services:
+  tasks:
+    build:
+      context: ../..
+    image: tasks:local
+    env_file: ./tasks.env
+    expose:
+      - "8080"
+    volumes:
+      - tasks-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+  proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    command: ["--config=/etc/oauth2-proxy.cfg"]
+    volumes:
+      - ./oauth2-proxy.cfg:/etc/oauth2-proxy.cfg:ro
+    ports:
+      - "4180:4180"
+    depends_on:
+      - tasks
+    restart: unless-stopped
+
+volumes:
+  tasks-data:

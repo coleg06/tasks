@@ -1,0 +1,14 @@
+# Minimal oauth2-proxy configuration (copy to oauth2-proxy.cfg and fill in). oauth2-proxy sets
+# X-Forwarded-User and X-Forwarded-Email on every request it forwards and overwrites any value
+# the client sent.
+provider = "google"
+client_id = "replace-with-your-client-id.apps.googleusercontent.com"
+client_secret = "replace-with-your-client-secret"
+# At least 32 random bytes, base64 or hex encoded.
+cookie_secret = "replace-with-a-random-secret"
+cookie_secure = true
+email_domains = ["example.org"]
+redirect_url = "https://tasks.example.org/oauth2/callback"
+http_address = "0.0.0.0:4180"
+upstreams = ["http://tasks:8080"]
+pass_user_headers = true
