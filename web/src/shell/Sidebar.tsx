@@ -17,8 +17,10 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { releaseLabel } from '../../../shared/release-label';
 import { defaultRuntimeFeatures } from '../../../shared/runtime-features';
 import { tenantProfile } from '../../../shared/tenant-profile';
+import { TASKS_RELEASE_VERSION } from '../../../shared/version';
 import { useBootstrap, useProjects } from '../api/queries';
 import type { TaskView } from '../api/types';
 import { viewLabels } from '../api/types';
@@ -47,6 +49,12 @@ export function Sidebar() {
   const features = bootstrap.data?.features ?? defaultRuntimeFeatures;
   const displayName =
     `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim() || (user?.email ?? null);
+
+  const version = releaseLabel(
+    tenantProfile.productName,
+    TASKS_RELEASE_VERSION,
+    bootstrap.data?.release,
+  );
 
   const canManage = bootstrap.data?.permissions.includes('tasks.manage') ?? false;
   const canViewTasks =
@@ -243,6 +251,10 @@ export function Sidebar() {
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
+
+        <p className="account-version" title={version.title}>
+          {version.text}
+        </p>
 
         {/* Sign-out stays a browser navigation so the active identity provider
             owns session invalidation rather than the UI imitating it. */}

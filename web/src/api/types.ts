@@ -48,6 +48,8 @@ export type Bootstrap = {
   authConfigured: boolean;
   features: RuntimeFeatures;
   permissions: string[];
+  /** Deployed release identifier (a commit SHA, or `local`). Not secret; also on `/healthz`. */
+  release?: string;
   user: Identity | null;
   impersonation?: { actor: Identity } | null;
 };
@@ -181,7 +183,126 @@ export type AdminUser = {
   status: 'active' | 'disabled';
   lastSeenAt: string | null;
   permissions: string[];
+  roles?: string[];
 };
+
+export type AdminPermission = { key: string; label: string; description: string };
+export type AdminPermissionArea = { area: string; label: string; permissions: AdminPermission[] };
+
+export type AdminRole = {
+  key: string;
+  label: string;
+  description: string;
+  builtin: boolean;
+  permissions: string[];
+  /** The role contains platform.admin and therefore every permission. */
+  grantsAll: boolean;
+  userCount: number;
+  /** The signed-in administrator may assign it (they hold everything it confers). */
+  assignable: boolean;
+};
+
+export type AdminRolesData = {
+  roles: AdminRole[];
+  catalog: AdminPermissionArea[];
+  canManageRoles: boolean;
+};
+
+export type DirectoryUser = {
+  id: number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  name: string;
+  photoUrl: string | null;
+  hasSignedIn: boolean;
+  status: 'active' | 'disabled';
+  principalType: 'human' | 'agent';
+  lastSeenAt: string | null;
+  createdAt: string;
+  roles: string[];
+  isPlatformAdmin: boolean;
+  isManager: boolean;
+};
+
+export type DirectoryFilters = {
+  q: string;
+  status: '' | 'active' | 'disabled';
+  role: string;
+  cursor: string;
+};
+
+export type DirectoryPage = {
+  users: DirectoryUser[];
+  total: number;
+  nextCursor: string | null;
+};
+
+export type PermissionSource =
+  | { type: 'direct' }
+  | { type: 'role'; role: string; label: string }
+  | { type: 'platform_admin' };
+
+export type AdminUserDetail = {
+  user: {
+    id: number;
+    email: string;
+    firstName: string;
+    lastName: string;
+    name: string;
+    photoUrl: string | null;
+    hasSignedIn: boolean;
+    status: 'active' | 'disabled';
+    principalType: 'human' | 'agent';
+    lastSeenAt: string | null;
+    createdAt: string;
+  };
+  roles: Array<{
+    key: string;
+    label: string;
+    grantedAt: string;
+    grantedBy: { id: number; name: string | null } | null;
+  }>;
+  directPermissions: string[];
+  effectivePermissions: Array<{ key: string; label: string; sources: PermissionSource[] }>;
+  isPlatformAdmin: boolean;
+  projects: Array<{ key: string; name: string; role: string }>;
+};
+
+export type BulkAction = 'add_roles' | 'remove_roles' | 'set_roles' | 'disable' | 'enable';
+
+export type InviteRowStatus = 'ok' | 'invalid_email' | 'duplicate' | 'exists';
+export type InviteRow = {
+  index: number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  status: InviteRowStatus;
+};
+
+export type AuditFilters = {
+  actor: string;
+  target: string;
+  action: string;
+  from: string;
+  to: string;
+  cursor: string;
+};
+
+export type AuditEvent = {
+  id: number;
+  entityType: string;
+  entityKey: string;
+  action: string;
+  changes: Record<string, unknown>;
+  /** True when the details are hidden because they may belong to a private personal project. */
+  redacted?: boolean;
+  requestId: string | null;
+  createdAt: string;
+  actor: { id: number | null; name: string; email: string | null };
+};
+
+export type AuditPage = { events: AuditEvent[]; nextCursor: number | null; actions?: string[] };
 
 export type AdminData = {
   stats: { users: number; projects: number; tasks: number; comments: number };
@@ -200,6 +321,7 @@ export type AdminData = {
     entityKey: string;
     action: string;
     changes: Record<string, unknown>;
+    redacted?: boolean;
     requestId: string | null;
     createdAt: string;
     actor: { name: string; email: string | null };

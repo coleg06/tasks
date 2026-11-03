@@ -1,6 +1,6 @@
 {
   "name": "@tasks-service/tasks",
-  "version": "1.8.2",
+  "version": "1.9.0",
   "private": true,
   "type": "module",
   "packageManager": "npm@12.0.2",
@@ -10,12 +10,13 @@
   "scripts": {
     "build": "tsc -b && npm run build:worker && npm run build:self-hosted && npm run build:mcp && vite build",
     "build:mcp": "esbuild src/mcp/standalone.ts src/mcp/tools.ts --bundle --format=esm --platform=node --target=node24 --outdir=dist/mcp",
-    "build:self-hosted": "esbuild src/self-hosted/server.ts --bundle --format=esm --platform=node --target=node24 --outfile=dist/server.js && esbuild src/self-hosted/migrate.ts --bundle --format=esm --platform=node --target=node24 --outfile=dist/migrate.js",
+    "build:self-hosted": "esbuild src/self-hosted/server.ts --bundle --format=esm --platform=node --target=node24 --outfile=dist/server.js && esbuild src/self-hosted/migrate.ts --bundle --format=esm --platform=node --target=node24 --outfile=dist/migrate.js && esbuild src/mcp/create-credential.ts --bundle --format=esm --platform=node --target=node24 --outfile=dist/mcp-create-credential.js",
     "build:web": "vite build",
     "build:worker": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2023 --conditions=worker,browser --external:node:* --outfile=dist/index.js",
     "check": "node scripts/check-release-version.mjs && biome check . && npm run typecheck",
     "dev": "vite",
     "format": "biome check --write .",
+    "mcp:create-credential": "esbuild src/mcp/create-credential.ts --bundle --format=esm --platform=node --target=node24 --log-level=warning --outfile=dist/mcp-create-credential.js && node dist/mcp-create-credential.js",
     "migrate:d1": "node scripts/apply-d1-migrations.mjs",
     "migrate:sqlite": "node dist/migrate.js",
     "smoke:self-hosted": "node scripts/smoke-self-hosted.mjs",

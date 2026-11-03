@@ -8,10 +8,17 @@ import { tenantProfile } from '../../../shared/tenant-profile';
 import type {
   AccountPreferences,
   AdminData,
+  AdminRolesData,
+  AdminUserDetail,
   AssignedEventWorkItem,
   Assignee,
+  AuditFilters,
+  AuditPage,
   Bootstrap,
+  BulkAction,
   DeliverableStatus,
+  DirectoryFilters,
+  DirectoryPage,
   EventAssistDraft,
   EventAssistMessage,
   EventAssistResponse,
@@ -28,6 +35,7 @@ import type {
   EventWorkItemCreate,
   EventWorkItemPatch,
   EventWorkItemStatus,
+  InviteRow,
   Project,
   ProjectMember,
   TaskComment,
@@ -98,6 +106,22 @@ const messages: Record<string, string> = {
   asset_invalid_type: 'Upload a PNG, JPEG, WebP, or PDF file.',
   asset_not_approved: 'Approve this exact revision before marking it final.',
   asset_missing: 'The stored file could not be found.',
+  platform_admin_required: 'Only a platform administrator can do that.',
+  role_exceeds_permissions: 'You can only give out access that you hold yourself.',
+  builtin_role_locked: 'Built-in roles cannot be changed or deleted.',
+  role_in_use: 'People still have this role. Choose a replacement role first.',
+  invalid_replacement: 'Choose a different role to replace it.',
+  role_exists: 'A role with that key already exists.',
+  invalid_label: 'Give the role a name of up to 80 characters.',
+  invalid_permissions: 'Choose at least one permission.',
+  unknown_permission: 'One of those permissions does not exist.',
+  unknown_role: 'One of those roles no longer exists. Refresh and try again.',
+  last_platform_admin_required: 'At least one active platform administrator must remain.',
+  cannot_remove_own_admin_access: 'You cannot remove your own administration access.',
+  cannot_remove_own_platform_admin_access: 'You cannot remove your own administrator access.',
+  agent_principal_protected: 'The automation account cannot be changed here.',
+  granted_by_role: 'That access comes from a role. Change the person’s roles instead.',
+  invalid_entries: 'Fix the highlighted rows and try again.',
 };
 
 const csrfCookie = `${tenantProfile.security.cookiePrefix}_csrf`;
@@ -572,7 +596,7 @@ export const api = {
           method: 'DELETE',
         }),
 
-  admin: () => request<AdminData>('/api/admin'),
+  admin: () => request<AdminData>('/api/admin?users=omit'),
 
   inviteAdminUser: (input: {
     email: string;
@@ -583,6 +607,7 @@ export const api = {
     isEventManager: boolean;
     canApproveEvents: boolean;
     isPlatformAdmin: boolean;
+    roles?: string[];
   }) =>
     request<{ user: unknown; signInPath: string }>('/api/admin/users', {
       method: 'POST',
@@ -607,6 +632,83 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(input),
     }),
+
+  adminRoles: () => request<AdminRolesData>('/api/admin/roles'),
+
+  createAdminRole: (input: { label: string; description: string; permissions: string[] }) =>
+    request<{ role: unknown }>('/api/admin/roles', { method: 'POST', body: JSON.stringify(input) }),
+
+  updateAdminRole: (
+    key: string,
+    input: { label?: string; description?: string; permissions?: string[] },
+  ) =>
+    request<{ role: unknown }>(`/api/admin/roles/${encodeURIComponent(key)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  deleteAdminRole: (key: string, replacement?: string) =>
+    request<{ ok: true; reassignedUsers: number }>(
+      `/api/admin/roles/${encodeURIComponent(key)}${
+        replacement ? `?replacement=${encodeURIComponent(replacement)}` : ''
+      }`,
+      { method: 'DELETE' },
+    ),
+
+  adminDirectory: (filters: DirectoryFilters, limit = 50) => {
+    const parameters = new URLSearchParams({ limit: String(limit) });
+    if (filters.q.trim()) parameters.set('q', filters.q.trim());
+    if (filters.status) parameters.set('status', filters.status);
+    if (filters.role) parameters.set('role', filters.role);
+    if (filters.cursor) parameters.set('cursor', filters.cursor);
+    return request<DirectoryPage>(`/api/admin/directory?${parameters.toString()}`);
+  },
+
+  adminUserDetail: (userId: number) => request<AdminUserDetail>(`/api/admin/users/${userId}`),
+
+  setAdminUserRoles: (userId: number, roles: string[]) =>
+    request<{ ok: true; changed: number }>(`/api/admin/users/${userId}/roles`, {
+      method: 'PUT',
+      body: JSON.stringify({ roles }),
+    }),
+
+  updateAdminUserProfile: (
+    userId: number,
+    input: { email?: string; firstName?: string; lastName?: string },
+  ) =>
+    request<{ ok: true }>(`/api/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+
+  bulkAdminUsers: (input: { action: BulkAction; userIds: number[]; roles?: string[] }) =>
+    request<{ ok: true; changed: number; unchanged: number; withoutRoles: number[] }>(
+      '/api/admin/users/bulk',
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    ),
+
+  bulkInviteAdminUsers: (input: {
+    entries: Array<{ email: string; firstName?: string; lastName?: string }>;
+    roles: string[];
+    dryRun: boolean;
+  }) =>
+    request<{
+      rows?: InviteRow[];
+      valid?: number;
+      created?: number;
+      signInPath?: string;
+    }>('/api/admin/users/bulk-invite', { method: 'POST', body: JSON.stringify(input) }),
+
+  adminAudit: (filters: AuditFilters, limit = 50) => {
+    const parameters = new URLSearchParams({ limit: String(limit) });
+    for (const key of ['actor', 'target', 'action', 'from', 'to', 'cursor'] as const) {
+      if (filters[key].trim()) parameters.set(key, filters[key].trim());
+    }
+    return request<AuditPage>(`/api/admin/audit?${parameters.toString()}`);
+  },
 
   impersonateAdminUser: (userId: number) =>
     request<{ ok: true }>(`/api/admin/users/${userId}/impersonate`, { method: 'POST' }),

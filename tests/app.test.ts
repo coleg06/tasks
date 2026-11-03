@@ -97,6 +97,8 @@ describe('worker foundation', () => {
   it('fails state and authentication routes closed on a tenant binding mismatch', async () => {
     const mismatchedEnv = {
       ...env,
+      // MCP routes only reach the tenant verification gate when MCP is enabled.
+      TASKS_MCP_ENABLED: 'true',
       DB: configurationDatabase({
         ...matchingTenantConfigurationRow,
         tenant_key: 'wrong-tenant',
@@ -189,9 +191,19 @@ describe('worker foundation', () => {
     },
   );
 
-  it('keeps MCP and agent routes closed without the private gateway and client credentials', async () => {
+  it('keeps MCP and agent routes absent on an install with no MCP settings', async () => {
     const mcp = await app.request(`${testOrigins.development}/mcp`, { method: 'POST' }, env);
     const agent = await app.request(`${testOrigins.development}/api/agent/v1/tasks`, {}, env);
+    expect(mcp.status).toBe(404);
+    expect(await mcp.json()).toEqual({ error: 'not_found' });
+    expect(agent.status).toBe(404);
+    expect(await agent.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('keeps MCP and agent routes closed when enabled without the gateway and credentials', async () => {
+    const enabled = { ...env, TASKS_MCP_ENABLED: 'true' } as Env;
+    const mcp = await app.request(`${testOrigins.development}/mcp`, { method: 'POST' }, enabled);
+    const agent = await app.request(`${testOrigins.development}/api/agent/v1/tasks`, {}, enabled);
     expect(mcp.status).toBe(503);
     expect(await mcp.json()).toEqual({ error: 'not_configured' });
     expect(agent.status).toBe(503);

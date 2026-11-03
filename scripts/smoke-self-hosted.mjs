@@ -4,11 +4,14 @@
 //   - the UI and /readyz are served;
 //   - session sign-in fails closed without its configuration, and redirects to Google with it;
 //   - trusted-upstream sign-in fails closed without its configuration, and with it authenticates
-//     only the configured header, bootstrapping the configured first administrator.
+//     only the configured header, bootstrapping the configured first administrator;
+//   - MCP is off on a fresh install, refuses to start misconfigured, and in token mode (credential
+//     made by the shipped credential command, no gateway secret) a real MCP client initializes,
+//     lists tools, and reads and writes a task.
 // Run after `npm run build`. No secrets are read; every credential below is generated here.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -160,6 +163,10 @@ try {
     );
     const bootstrap = await fetch(`${session.base}/api/bootstrap`);
     check(bootstrap.status === 401, 'the API is closed without a session');
+    const mcpOff = await fetch(`${session.base}/mcp`, { method: 'POST', body: '{}' });
+    check(mcpOff.status === 404, 'a fresh install has MCP off: /mcp answers 404');
+    const agentOff = await fetch(`${session.base}/api/agent/v1/tasks`);
+    check(agentOff.status === 404, 'a fresh install has MCP off: the agent API answers 404');
   } finally {
     await stop(session);
   }
@@ -239,6 +246,83 @@ try {
     check(cookie.status === 401, 'trusted-upstream: session cookies are never consulted');
   } finally {
     await stop(trusted);
+  }
+
+  // 5. MCP: fail closed when misconfigured, then token mode with a real client.
+  const mcpMissing = exitsNonZeroQuickly(
+    baseEnv({ TASKS_SITE_PORT: refusalPort, ...sessionEnv, TASKS_MCP_ENABLED: 'true' }),
+  );
+  check(
+    mcpMissing.status !== 0 &&
+      /TASKS_MCP_CREDENTIALS_JSON/.test(mcpMissing.output) &&
+      /TASKS_MCP_GATEWAY_SECRET/.test(mcpMissing.output),
+    'MCP enabled without its settings refuses to start and names them',
+  );
+  const mcpInvalid = exitsNonZeroQuickly(
+    baseEnv({ TASKS_SITE_PORT: refusalPort, ...sessionEnv, TASKS_MCP_ENABLED: 'yes' }),
+  );
+  check(
+    mcpInvalid.status !== 0 && /TASKS_MCP_ENABLED/.test(mcpInvalid.output),
+    'an invalid TASKS_MCP_ENABLED refuses to start',
+  );
+
+  const credentialFile = join(work, 'mcp-credentials.json');
+  const credential = spawnSync(
+    process.execPath,
+    [
+      resolve(root, 'dist/mcp-create-credential.js'),
+      '--name',
+      'Smoke Client',
+      '--scope',
+      'read_write',
+      '--output',
+      credentialFile,
+    ],
+    { encoding: 'utf8' },
+  );
+  check(credential.status === 0, 'the credential command creates a registry document');
+  const registry = readFileSync(credentialFile, 'utf8');
+  const token = JSON.parse(registry).credentials[0].token;
+  // MCP only accepts the Host of TASKS_PUBLIC_ORIGIN (DNS-rebinding protection); this loopback
+  // run leaves the origin unset so the request's own host is the public one.
+  const { TASKS_PUBLIC_ORIGIN: _origin, ...loopbackEnv } = sessionEnv;
+  const mcp = await start({
+    ...loopbackEnv,
+    TASKS_MCP_ENABLED: 'true',
+    TASKS_MCP_AUTH_MODE: 'token',
+    TASKS_MCP_CREDENTIALS_JSON: registry,
+  });
+  try {
+    const anonymous = await fetch(`${mcp.base}/mcp`, { method: 'POST', body: '{}' });
+    check(anonymous.status === 401, 'token mode: a call without the token is rejected');
+    const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client');
+    const client = new Client({ name: 'smoke', version: '1.0.0' });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${mcp.base}/mcp`), {
+        authProvider: { token: async () => token },
+      }),
+    );
+    try {
+      const tools = (await client.listTools()).tools.map((tool) => tool.name);
+      check(
+        tools.includes('task_create') && tools.includes('task_get'),
+        'token mode: a real MCP client initializes and lists tools',
+      );
+      const created = await client.callTool({
+        name: 'task_create',
+        arguments: { title: 'Smoke task', idempotencyKey: 'smoke-create-0001' },
+      });
+      const key = created.structuredContent?.task?.key;
+      const fetched = await client.callTool({ name: 'task_get', arguments: { task: key } });
+      check(
+        Boolean(key) && fetched.structuredContent?.task?.title === 'Smoke task',
+        'token mode: a task written through MCP is read back through MCP',
+      );
+    } finally {
+      await client.close();
+    }
+  } finally {
+    await stop(mcp);
   }
 } finally {
   rmSync(work, { recursive: true, force: true });

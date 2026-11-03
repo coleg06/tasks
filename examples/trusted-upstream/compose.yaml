@@ -2,7 +2,8 @@
 # internal network alone, which is what TASKS_TRUSTED_UPSTREAM_TRUST acknowledges.
 #   cp tasks.env.example tasks.env && cp oauth2-proxy.cfg.example oauth2-proxy.cfg  # then edit both
 #   docker compose up --build
-# Put TLS termination in front of the proxy for production (the redirect URL must be https).
+# Put TLS termination in front of the proxy for production (the redirect URL must be https), and
+# set request rate limits there: the application has none of its own.
 services:
   tasks:
     build:

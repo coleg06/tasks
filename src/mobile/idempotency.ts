@@ -4,6 +4,20 @@ import { sha256Hex } from './assertion';
 
 const keyPattern = /^[A-Za-z0-9._:-]{8,128}$/;
 
+async function releaseReservation(
+  context: Context<TaskAppEnv>,
+  userId: number,
+  scope: string,
+  key: string,
+) {
+  await context.env.DB.prepare(
+    `DELETE FROM mobile_idempotency_keys
+     WHERE user_id = ? AND scope = ? AND idempotency_key = ?`,
+  )
+    .bind(userId, scope, key)
+    .run();
+}
+
 export async function withMobileIdempotency(
   context: Context<TaskAppEnv>,
   operation: () => Promise<Response>,
@@ -66,15 +80,18 @@ export async function withMobileIdempotency(
     });
   }
 
-  const response = await operation();
+  let response: Response;
+  try {
+    response = await operation();
+  } catch (error) {
+    // An operation that threw did not complete. Release the reservation so a retry with the same
+    // key runs again instead of answering request_in_progress until the key expires.
+    await releaseReservation(context, identity.user.id, scope, key);
+    throw error;
+  }
   const body = await response.clone().text();
   if (response.status >= 500) {
-    await context.env.DB.prepare(
-      `DELETE FROM mobile_idempotency_keys
-       WHERE user_id = ? AND scope = ? AND idempotency_key = ?`,
-    )
-      .bind(identity.user.id, scope, key)
-      .run();
+    await releaseReservation(context, identity.user.id, scope, key);
     return response;
   }
   await context.env.DB.prepare(

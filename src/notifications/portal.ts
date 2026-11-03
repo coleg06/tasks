@@ -145,7 +145,7 @@ export async function retryTaskAlertOutbox(env: Env) {
            AND u.status = 'active' AND u.portal_db_id IS NOT NULL
            AND t.archived_at IS NULL AND p.archived_at IS NULL
            AND EXISTS (
-             SELECT 1 FROM user_permissions view_up
+             SELECT 1 FROM effective_user_permissions view_up
              WHERE view_up.user_id = u.id
                AND view_up.permission_key IN ('tasks.view', 'tasks.personal', 'platform.admin')
            )
@@ -153,7 +153,7 @@ export async function retryTaskAlertOutbox(env: Env) {
              (p.project_type = 'personal' AND p.personal_owner_user_id = u.id)
              OR (p.project_type = 'shared' AND (
                EXISTS (
-                 SELECT 1 FROM user_permissions shared_view_up
+                 SELECT 1 FROM effective_user_permissions shared_view_up
                  WHERE shared_view_up.user_id = u.id
                    AND shared_view_up.permission_key IN ('tasks.view', 'platform.admin')
                ) AND (
@@ -161,7 +161,7 @@ export async function retryTaskAlertOutbox(env: Env) {
                  OR wm.role IN ('owner','admin')
                  OR pm.user_id IS NOT NULL
                  OR EXISTS (
-                   SELECT 1 FROM user_permissions manage_up
+                   SELECT 1 FROM effective_user_permissions manage_up
                    WHERE manage_up.user_id = u.id AND manage_up.permission_key = 'tasks.manage'
                  )
                )
@@ -182,7 +182,7 @@ export async function retryTaskAlertOutbox(env: Env) {
        AND o.entity_type = 'task' AND u.status = 'active' AND u.portal_db_id IS NOT NULL
        AND t.archived_at IS NULL AND p.archived_at IS NULL
        AND EXISTS (
-         SELECT 1 FROM user_permissions view_up
+         SELECT 1 FROM effective_user_permissions view_up
          WHERE view_up.user_id = u.id
            AND view_up.permission_key IN ('tasks.view', 'tasks.personal', 'platform.admin')
        )
@@ -190,7 +190,7 @@ export async function retryTaskAlertOutbox(env: Env) {
          (p.project_type = 'personal' AND p.personal_owner_user_id = u.id)
          OR (p.project_type = 'shared' AND (
            EXISTS (
-             SELECT 1 FROM user_permissions shared_view_up
+             SELECT 1 FROM effective_user_permissions shared_view_up
              WHERE shared_view_up.user_id = u.id
                AND shared_view_up.permission_key IN ('tasks.view', 'platform.admin')
            ) AND (
@@ -198,7 +198,7 @@ export async function retryTaskAlertOutbox(env: Env) {
              OR wm.role IN ('owner','admin')
              OR pm.user_id IS NOT NULL
              OR EXISTS (
-               SELECT 1 FROM user_permissions manage_up
+               SELECT 1 FROM effective_user_permissions manage_up
                WHERE manage_up.user_id = u.id AND manage_up.permission_key = 'tasks.manage'
              )
            )

@@ -5,6 +5,7 @@ import { serve } from '@hono/node-server';
 import { tenantProfile } from '../../shared/tenant-profile';
 import { app } from '../app';
 import type { Env } from '../env';
+import { mcpConfigurationProblems } from '../mcp/config';
 import { runScheduledJob, scheduledJobs } from '../platform/jobs';
 import { Scheduler } from '../platform/scheduler';
 import { profileConfigurationProblems } from '../tenancy/configuration';
@@ -151,6 +152,14 @@ export async function startSelfHostedServer(
     : [];
   if (profileProblems.length > 0) {
     throw new Error(`Tenant profile is incomplete; set: ${profileProblems.join(', ')}`);
+  }
+  // MCP settings are checked like the other fail-closed settings: production refuses to start and
+  // names them; elsewhere the server starts and /readyz names them.
+  const mcpProblems = tenantProfile.agent.enabled
+    ? mcpConfigurationProblems(baseEnv as Parameters<typeof mcpConfigurationProblems>[0])
+    : [];
+  if (baseEnv.ENVIRONMENT === 'production' && mcpProblems.length > 0) {
+    throw new Error(`Invalid MCP configuration; set: ${mcpProblems.join(', ')}`);
   }
   const platform = config ? await openSelfHostedPlatform(config) : null;
   if (platform && missingIdentity.length > 0) {

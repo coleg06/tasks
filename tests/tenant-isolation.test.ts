@@ -141,6 +141,8 @@ function environment(current: () => DatabaseSync, queries: string[]) {
     GOOGLE_CLIENT_ID: 'synthetic-client',
     GOOGLE_CLIENT_SECRET: 'synthetic-secret',
     SESSION_SECRET: 'synthetic-session-secret-for-isolation-tests',
+    // The MCP and agent routes only reach the tenant gate when the hosted MCP server is on.
+    TASKS_MCP_ENABLED: 'true',
   } as unknown as Env;
 }
 

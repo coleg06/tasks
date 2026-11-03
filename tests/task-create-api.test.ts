@@ -32,7 +32,8 @@ describe('task creation API reliability', () => {
           if (sql.includes('FROM users WHERE id = ?')) {
             return { id: 6, email: 'owner2@example.org', status: 'active' };
           }
-          if (sql.includes('SELECT 1 AS allowed FROM user_permissions')) return { allowed: 1 };
+          if (sql.includes('SELECT 1 AS allowed FROM effective_user_permissions'))
+            return { allowed: 1 };
           if (sql.includes('SELECT p.id, p.workspace_id, p.project_key')) {
             return {
               id: 1,

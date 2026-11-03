@@ -16,6 +16,15 @@ import {
   stopAdminImpersonation,
   updateAdminUser,
 } from './admin/api';
+import { listAuditEvents } from './admin/audit';
+import {
+  bulkAdminUsers,
+  bulkInviteAdminUsers,
+  getAdminUserDetail,
+  listDirectory,
+  setAdminUserRoles,
+} from './admin/people';
+import { createAdminRole, deleteAdminRole, listAdminRoles, updateAdminRole } from './admin/roles';
 import { getWorkflowAnalytics } from './analytics/api';
 import {
   authIsConfigured,
@@ -54,6 +63,7 @@ import {
   listEventOptions,
   listEvents,
   listEventTemplates,
+  maximumAssetBytes,
   patchDeliverable,
   patchEventFacts,
   patchEventStage,
@@ -63,12 +73,14 @@ import {
   uploadAssetVersion,
 } from './events/api';
 import { assistEventIntake } from './events/assist-api';
+import { apiBodyLimit, securityHeaders } from './http-hardening';
 import { trustedUpstreamSettings, usesEnvTrustedUpstream } from './identity/auth-mode';
 import { resolveTasksIdentity } from './identity/context';
 import { trustedUpstreamIdentity } from './identity/trusted-upstream';
 import { ingestPortalSupportTicket, portalSupportHealth } from './integrations/portal-support';
 import { logApplicationError, logUnhandledError, requestLogger } from './logging';
 import { authenticateMcpRequest, McpAuthenticationError, mcpAuthErrorResponse } from './mcp/auth';
+import { mcpAvailability, mcpConfigurationProblems } from './mcp/config';
 import { createMcpApiCaller, createTasksMcpHandler } from './mcp/server';
 import {
   GatewayAssertionError,
@@ -131,6 +143,8 @@ function requireRuntimeFeature(
 }
 
 app.use('*', requestLogger);
+app.use('*', securityHeaders);
+app.use('/api/*', apiBodyLimit(maximumAssetBytes));
 
 function isPortableApiPath(path: string) {
   return (
@@ -155,6 +169,20 @@ app.use('*', async (context, next) => {
   ) {
     return context.json({ error: 'not_found' }, 404);
   }
+  await next();
+});
+
+// The hosted MCP server is a per-server option (TASKS_MCP_ENABLED). When it is off, /mcp and the
+// agent API it calls answer exactly as absent routes, before any other configuration is consulted.
+app.use('*', async (context, next) => {
+  const path = context.req.path;
+  if (path !== '/mcp' && path !== '/api/agent/v1' && !path.startsWith('/api/agent/v1/')) {
+    await next();
+    return;
+  }
+  const availability = tenantProfile.agent.enabled ? mcpAvailability(context.env) : 'disabled';
+  if (availability === 'disabled') return context.json({ error: 'not_found' }, 404);
+  if (availability === 'invalid') return context.json({ error: 'not_configured' }, 503);
   await next();
 });
 
@@ -322,6 +350,15 @@ if (tenantProfile.capabilities.portal) {
 }
 
 app.onError(async (error, context) => {
+  // A request body that is not valid JSON is the caller's mistake, not a server fault. Reads
+  // (which carry no body) keep reporting stored-data parse failures as server errors.
+  if (
+    error instanceof SyntaxError &&
+    /JSON/i.test(error.message) &&
+    !['GET', 'HEAD', 'OPTIONS'].includes(context.req.method)
+  ) {
+    return context.json({ error: 'invalid_json' }, 400);
+  }
   await logUnhandledError(error, context.req.raw, context.env, context.get('requestId'));
   return context.json({ error: 'internal_error' }, 500);
 });
@@ -339,6 +376,14 @@ app.get('/readyz', async (context) => {
   try {
     if (await tenantRuntimeAdapters.verifyTenantConfiguration(context.env)) {
       for (const check of context.env.PLATFORM_READINESS_CHECKS ?? []) await check();
+      // Names only the MCP settings that are wrong, never their values.
+      const mcpProblems = tenantProfile.agent.enabled ? mcpConfigurationProblems(context.env) : [];
+      if (mcpProblems.length > 0) {
+        return context.json(
+          { error: 'mcp_configuration_invalid', ok: false, settings: mcpProblems },
+          503,
+        );
+      }
       return context.json({
         ok: true,
         service: tenantProfile.serviceName,
@@ -472,6 +517,11 @@ app.get('/auth/callback', async (context) => {
 });
 
 app.post('/auth/logout', (context) => {
+  // Without this a page on another site could sign a user out by posting a form here.
+  const origin = context.req.header('Origin');
+  if (origin !== undefined && origin !== expectedBrowserOrigin(context)) {
+    return context.json({ error: 'csrf_rejected' }, 403);
+  }
   deleteCookie(context, SESSION_COOKIE, { path: '/', secure: true });
   return context.redirect('/');
 });
@@ -490,6 +540,7 @@ app.get('/api/bootstrap', async (context) => {
       authConfigured: true,
       features: resolveRuntimeFeatures(context.env.FEATURE_MODULES),
       permissions: [...identity.permissions],
+      release: context.env.RELEASE_SHA,
       user: {
         id: Number.isSafeInteger(numericReference) && numericReference >= 0 ? numericReference : 0,
         email,
@@ -602,6 +653,7 @@ app.get('/api/bootstrap', async (context) => {
       authConfigured: true,
       features,
       permissions: permissionRows,
+      release: context.env.RELEASE_SHA,
       user: user
         ? {
             ...user,
@@ -680,6 +732,18 @@ app.post('/api/admin/users', inviteAdminUser);
 app.patch('/api/admin/users/:userId', updateAdminUser);
 app.post('/api/admin/users/:userId/impersonate', impersonateAdminUser);
 app.post('/api/admin/impersonation/stop', stopAdminImpersonation);
+// Roles, the paged user directory, bulk operations and the audit view (legacy API only; each
+// handler answers 404 unless the profile enables user administration).
+app.get('/api/admin/directory', listDirectory);
+app.get('/api/admin/audit', listAuditEvents);
+app.get('/api/admin/roles', listAdminRoles);
+app.post('/api/admin/roles', createAdminRole);
+app.patch('/api/admin/roles/:roleKey', updateAdminRole);
+app.delete('/api/admin/roles/:roleKey', deleteAdminRole);
+app.post('/api/admin/users/bulk', bulkAdminUsers);
+app.post('/api/admin/users/bulk-invite', bulkInviteAdminUsers);
+app.get('/api/admin/users/:userId', getAdminUserDetail);
+app.put('/api/admin/users/:userId/roles', setAdminUserRoles);
 if (tenantProfile.capabilities.events) {
   app.get('/api/event-options', listEventOptions);
   app.get('/api/event-work-items', listAssignedEventWorkItems);

@@ -82,7 +82,7 @@ async function taskAccessibleToUser(context: AppContext, taskId: number, userId:
      WHERE t.id = ? AND t.archived_at IS NULL AND p.archived_at IS NULL
        AND ${projectAccess}
        AND EXISTS (
-         SELECT 1 FROM user_permissions notification_up
+         SELECT 1 FROM effective_user_permissions notification_up
          WHERE notification_up.user_id = ?
            AND notification_up.permission_key IN ('tasks.view', 'tasks.personal', 'platform.admin')
        )`,
@@ -227,7 +227,7 @@ export async function updateProject(context: AppContext) {
          wm.role IN ('owner','admin')
          OR pm.role = 'owner'
          OR EXISTS(
-           SELECT 1 FROM user_permissions admin_up
+           SELECT 1 FROM effective_user_permissions admin_up
            WHERE admin_up.user_id = wm.user_id AND admin_up.permission_key = 'tasks.manage'
          )
        )`,
@@ -302,7 +302,7 @@ export async function upsertProjectMember(context: AppContext) {
          wm.role IN ('owner','admin')
          OR pm.role = 'owner'
          OR EXISTS(
-           SELECT 1 FROM user_permissions admin_up
+           SELECT 1 FROM effective_user_permissions admin_up
            WHERE admin_up.user_id = wm.user_id AND admin_up.permission_key = 'tasks.manage'
          )
        )`,
@@ -325,14 +325,16 @@ export async function upsertProjectMember(context: AppContext) {
     .first<{ id: number }>();
   if (!user) return context.json({ error: 'user_creation_failed' }, 500);
   await context.env.DB.batch([
+    // A person who holds a role gets these from their roles alone: a direct grant here would let a
+    // Viewer comment and would outlive the role.
     context.env.DB.prepare(
       `INSERT OR IGNORE INTO user_permissions (user_id, permission_key)
-       VALUES (?, 'tasks.view')`,
-    ).bind(user.id),
+       SELECT ?, 'tasks.view' WHERE NOT EXISTS (SELECT 1 FROM user_roles WHERE user_id = ?)`,
+    ).bind(user.id, user.id),
     context.env.DB.prepare(
       `INSERT OR IGNORE INTO user_permissions (user_id, permission_key)
-       VALUES (?, 'tasks.comment')`,
-    ).bind(user.id),
+       SELECT ?, 'tasks.comment' WHERE NOT EXISTS (SELECT 1 FROM user_roles WHERE user_id = ?)`,
+    ).bind(user.id, user.id),
     context.env.DB.prepare(
       `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES (?, ?, 'member')
        ON CONFLICT(workspace_id, user_id) DO NOTHING`,
@@ -835,7 +837,7 @@ export async function deleteComment(context: AppContext) {
   const task = await accessibleTask(context, identity.user.id, context.req.param('taskKey') ?? '');
   if (!task) return context.json({ error: 'not_found' }, 404);
   const canManage = await context.env.DB.prepare(
-    `SELECT 1 AS allowed FROM user_permissions
+    `SELECT 1 AS allowed FROM effective_user_permissions
      WHERE user_id = ? AND permission_key = 'tasks.manage'`,
   )
     .bind(identity.user.id)

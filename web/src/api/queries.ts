@@ -3,8 +3,11 @@ import { api } from './client';
 import type {
   AccountPreferences,
   AssignedEventWorkItem,
+  AuditFilters,
   Bootstrap,
+  BulkAction,
   DeliverableStatus,
+  DirectoryFilters,
   EventIntake,
   EventResponsibilityPatch,
   EventStage,
@@ -32,6 +35,11 @@ export const keys = {
   assignees: (projectKey: string) => ['assignees', projectKey] as const,
   members: (projectKey: string) => ['members', projectKey] as const,
   admin: ['admin'] as const,
+  // Every administration query shares the ['admin'] prefix so one invalidation refreshes them all.
+  adminRoles: ['admin', 'roles'] as const,
+  adminDirectory: (filters: DirectoryFilters) => ['admin', 'directory', filters] as const,
+  adminUser: (userId: number) => ['admin', 'user', userId] as const,
+  adminAudit: (filters: AuditFilters) => ['admin', 'audit', filters] as const,
   eventTemplates: ['event-templates'] as const,
   eventOptions: ['event-options'] as const,
   assignedEventWorkItems: (filters: { q?: string; include?: string }) =>
@@ -259,6 +267,99 @@ export function useUpdateProjectMember(projectKey: string | undefined) {
 
 export function useAdmin() {
   return useQuery({ queryKey: keys.admin, queryFn: api.admin });
+}
+
+export function useAdminRoles() {
+  return useQuery({ queryKey: keys.adminRoles, queryFn: api.adminRoles });
+}
+
+export function useAdminDirectory(filters: DirectoryFilters) {
+  return useQuery({
+    queryKey: keys.adminDirectory(filters),
+    queryFn: () => api.adminDirectory(filters),
+    // Keep the previous page on screen while the next one loads, so paging does not flash.
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useAdminUserDetail(userId: number | null) {
+  return useQuery({
+    queryKey: keys.adminUser(userId ?? 0),
+    queryFn: () => api.adminUserDetail(userId as number),
+    enabled: userId !== null,
+  });
+}
+
+export function useAdminAudit(filters: AuditFilters) {
+  return useQuery({
+    queryKey: keys.adminAudit(filters),
+    queryFn: () => api.adminAudit(filters),
+    placeholderData: (previous) => previous,
+  });
+}
+
+function useAdminMutation<TInput, TOutput>(mutationFn: (input: TInput) => Promise<TOutput>) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.admin });
+    },
+  });
+}
+
+export function useSetAdminUserRoles() {
+  return useAdminMutation(({ userId, roles }: { userId: number; roles: string[] }) =>
+    api.setAdminUserRoles(userId, roles),
+  );
+}
+
+export function useUpdateAdminUserProfile() {
+  return useAdminMutation(
+    ({
+      userId,
+      ...input
+    }: {
+      userId: number;
+      email?: string;
+      firstName?: string;
+      lastName?: string;
+    }) => api.updateAdminUserProfile(userId, input),
+  );
+}
+
+export function useBulkAdminUsers() {
+  return useAdminMutation((input: { action: BulkAction; userIds: number[]; roles?: string[] }) =>
+    api.bulkAdminUsers(input),
+  );
+}
+
+export function useBulkInviteAdminUsers() {
+  return useAdminMutation(api.bulkInviteAdminUsers);
+}
+
+export function useCreateAdminRole() {
+  return useAdminMutation(api.createAdminRole);
+}
+
+export function useUpdateAdminRole() {
+  return useAdminMutation(
+    ({
+      key,
+      ...input
+    }: {
+      key: string;
+      label?: string;
+      description?: string;
+      permissions?: string[];
+    }) => api.updateAdminRole(key, input),
+  );
+}
+
+export function useDeleteAdminRole() {
+  return useAdminMutation(({ key, replacement }: { key: string; replacement?: string }) =>
+    api.deleteAdminRole(key, replacement),
+  );
 }
 
 export function useUpdateAdminUser() {

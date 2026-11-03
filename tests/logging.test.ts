@@ -29,4 +29,17 @@ describe('operational logging', () => {
     expect(details).not.toContain('headers');
     expect(details).not.toContain('must-not-be-recorded');
   });
+
+  it('does nothing on a deployment with no local database', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      recordOperationalEvent({ ENVIRONMENT: 'production' } as unknown as Env, {
+        event: 'http.unhandled_error',
+        source: 'test',
+        message: 'synthetic',
+      }),
+    ).resolves.toBeUndefined();
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
 });

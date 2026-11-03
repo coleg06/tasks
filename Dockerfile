@@ -38,6 +38,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 COPY --from=build --chown=node:node /app/dist/server.js ./dist/server.js
 COPY --from=build --chown=node:node /app/dist/migrate.js ./dist/migrate.js
+COPY --from=build --chown=node:node /app/dist/mcp-create-credential.js ./dist/mcp-create-credential.js
 COPY --from=build --chown=node:node /app/migrations ./migrations
 COPY --from=build --chown=node:node /app/web/dist ./web/dist
 

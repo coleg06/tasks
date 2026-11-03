@@ -312,7 +312,8 @@ describe('default adapter-only mode is unchanged', () => {
       expect((await fetch(`${base}/readyz`)).status).toBe(503);
       expect((await fetch(`${base}/api/tasks`)).status).toBe(closed);
       expect((await fetch(`${base}/api/admin`)).status).toBe(closed);
-      expect((await fetch(`${base}/mcp`, { method: 'POST', body: '{}' })).status).toBe(closed);
+      // MCP is off unless enabled, so it is absent (404) regardless of the tenant gate.
+      expect((await fetch(`${base}/mcp`, { method: 'POST', body: '{}' })).status).toBe(404);
       expect((adapterOnly.env as { DB?: unknown }).DB).toBeUndefined();
     } finally {
       await adapterOnly.close();

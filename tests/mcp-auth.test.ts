@@ -87,4 +87,82 @@ describe('MCP authentication', () => {
       ),
     ).rejects.toMatchObject({ code: 'client_rejected', status: 401 });
   });
+
+  describe('modes', () => {
+    const noGateway = { TASKS_MCP_CREDENTIALS_JSON: env.TASKS_MCP_CREDENTIALS_JSON } as Env;
+    const tokenMode = { ...noGateway, TASKS_MCP_AUTH_MODE: 'token' } as Env;
+
+    it('rejects the default mode without a gateway secret, even with a valid client token', async () => {
+      await expect(
+        authenticateMcpRequest(request({ Authorization: `Bearer ${clientToken}` }), noGateway),
+      ).rejects.toMatchObject({ code: 'not_configured', status: 503 });
+      await expect(
+        authenticateMcpRequest(request({ Authorization: `Bearer ${clientToken}` }), {
+          ...noGateway,
+          TASKS_MCP_AUTH_MODE: 'gateway-and-token',
+        } as Env),
+      ).rejects.toMatchObject({ code: 'not_configured', status: 503 });
+    });
+
+    it('token mode needs no gateway secret and ignores a supplied gateway header', async () => {
+      const bearer = await authenticateMcpRequest(
+        request({ Authorization: `Bearer ${clientToken}` }),
+        tokenMode,
+      );
+      const header = await authenticateMcpRequest(
+        request({ [MCP_CLIENT_HEADER]: clientToken, [MCP_GATEWAY_HEADER]: 'not-the-secret' }),
+        tokenMode,
+      );
+      expect(bearer).toEqual(header);
+      expect(bearer.scope).toBe('read_write');
+    });
+
+    it('token mode still rejects missing and wrong tokens', async () => {
+      await expect(authenticateMcpRequest(request(), tokenMode)).rejects.toMatchObject({
+        code: 'client_rejected',
+        status: 401,
+      });
+      await expect(
+        authenticateMcpRequest(request({ Authorization: 'Bearer wrong' }), tokenMode),
+      ).rejects.toMatchObject({ code: 'client_rejected', status: 401 });
+    });
+
+    it('token mode keeps expiry and reports the read-only scope', async () => {
+      const readOnly = {
+        TASKS_MCP_AUTH_MODE: 'token',
+        TASKS_MCP_CREDENTIALS_JSON: JSON.stringify({
+          version: 1,
+          credentials: [
+            {
+              clientId: 'reader',
+              name: 'Reader',
+              role: 'Agent',
+              runtime: 'test',
+              scope: 'read',
+              token: clientToken,
+              expiresAt: 100,
+            },
+          ],
+        }),
+      } as Env;
+      const identity = await authenticateMcpRequest(
+        request({ Authorization: `Bearer ${clientToken}` }),
+        readOnly,
+        50,
+      );
+      expect(identity.scope).toBe('read');
+      await expect(
+        authenticateMcpRequest(request({ Authorization: `Bearer ${clientToken}` }), readOnly, 100),
+      ).rejects.toMatchObject({ code: 'client_rejected' });
+    });
+
+    it('treats an unknown mode as not configured', async () => {
+      await expect(
+        authenticateMcpRequest(request({ Authorization: `Bearer ${clientToken}` }), {
+          ...tokenMode,
+          TASKS_MCP_AUTH_MODE: 'open',
+        } as Env),
+      ).rejects.toMatchObject({ code: 'not_configured', status: 503 });
+    });
+  });
 });

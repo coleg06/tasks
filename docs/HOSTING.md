@@ -34,6 +34,29 @@ Implementations for self-hosting live in `src/platform/sqlite/` (driver and migr
 never from `src/index.ts`; a test bundles the Worker entry point and asserts it contains no
 `node:sqlite` reference.
 
+## Cloudflare Worker
+
+`wrangler.jsonc` is a neutral template (`name: tasks-local`, a zeroed D1 `database_id`, an R2 bucket
+`tasks-assets-local`). Copy it into your deployment, replace those names and IDs, and add what it
+deliberately leaves out: routes or a custom domain, and cron triggers. The Worker's `scheduled()`
+handler runs every job in `src/platform/jobs.ts` whose cron expression equals the trigger that fired,
+so declare `triggers.crons` with the expressions in that table (`0 13 * * *` and `*/5 * * * *` at the
+time of writing).
+
+- `npm run build` produces the Worker bundle (`dist/index.js`) and the UI (`web/dist`, served by the
+  `ASSETS` binding). The API paths run the Worker first; other paths are static assets.
+- Bindings: `DB` (D1), `EVENT_ASSETS` (R2), `ASSETS`. Plain variables (`ENVIRONMENT`, `RELEASE_SHA`,
+  `FEATURE_MODULES`) go in `vars`; secrets (`SESSION_SECRET`, `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, and the optional settings in the table below) with `wrangler secret put`.
+- Migrations: `wrangler d1 migrations apply <database>` from the repository root, or
+  `CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... node scripts/apply-d1-migrations.mjs <database>`.
+  Apply them before or immediately after deploying a release that adds one.
+- Static assets are served by Cloudflare without running the Worker, so the response headers the
+  application adds to its own routes (`nosniff`, framing, referrer policy) do not cover them. Add a
+  `_headers` file to the web build or set `run_worker_first` to `["/*"]` if you need them there.
+- The Worker deployment is exercised by the contract tests under workerd; it is not covered by the
+  self-hosted smoke test.
+
 ## Self-hosted SQLite mode
 
 Requires Node 24 or newer (the image uses Node 24; `node:sqlite` is built in, no native dependency).
@@ -53,7 +76,7 @@ Requires Node 24 or newer (the image uses Node 24; `node:sqlite` is built in, no
 | `TASKS_PUBLIC_ORIGIN` | Browser-facing origin (`https://tasks.example.org`). Used for the OAuth redirect URI, the CSRF origin check and links in email. Default: the origin of each request, which is wrong behind a TLS-terminating proxy. |
 | `TASKS_HOSTED_DOMAIN` | Restrict sign-in and invitations to one email domain. No default. |
 | `TASKS_INITIAL_ADMIN_EMAIL` | The first administrator: granted every permission at first sign-in. No default. |
-| `TASKS_MCP_*`, ... | Same application secrets as on Cloudflare; supply them through your secret mechanism, never in the image. |
+| `TASKS_MCP_ENABLED`, `TASKS_MCP_AUTH_MODE`, `TASKS_MCP_CREDENTIALS_JSON`, `TASKS_MCP_GATEWAY_SECRET` | The hosted MCP server (see [MCP server](#mcp-server)). Off unless enabled. Supply the credentials and gateway secret through your secret mechanism, never in the image. |
 
 Invalid or partial configuration (for example `TASKS_SQLITE_PATH` without `TASKS_DATASTORE`, an object
 store path without `TASKS_OBJECT_STORE`, or an unknown store) fails at startup before a port is bound.
@@ -94,11 +117,103 @@ acknowledgement, stops startup under `ENVIRONMENT=production` (naming only the v
 `/api` and `/auth` request answer 503 `trusted_upstream_not_configured` elsewhere. A request without the
 header, with an address outside `TASKS_HOSTED_DOMAIN`, or for a disabled user has no identity (401).
 **The application must be reachable only through the proxy, and the proxy must overwrite the header on every
-request**; anything that can reach the port directly can impersonate any user. Impersonation (administrator
+request**; anything that can reach the port directly can impersonate any user. The server listens on
+`0.0.0.0` by default: publish no port for it (as `examples/trusted-upstream` does) or bind it with
+`TASKS_SITE_HOST`. Impersonation (administrator
 "view as") is a session-cookie feature and is unavailable in this mode. Sign-out belongs to the proxy.
 
 Working configurations: `examples/google-sign-in` and `examples/trusted-upstream` (Compose files and
-environment templates).
+environment templates). For a throwaway local trial with no identity provider, `examples/local/try-it.mjs`
+starts the built server in trusted-upstream mode behind a loopback-only proxy that signs you in as an
+administrator; it is not for any shared or networked machine.
+
+Generate `SESSION_SECRET` yourself (`openssl rand -hex 32`; production startup requires at least 32 characters); the example files ship it empty so that a
+production start fails until you do. Any non-empty value is accepted, so a short or published secret
+lets anyone sign in as any user.
+
+### MCP server
+
+Every Tasks server can host a Model Context Protocol endpoint at `/mcp` (stateless Streamable HTTP) so
+agents can list, search, read, create, update and comment on tasks. It is **off on a fresh install**.
+
+| Setting | Meaning |
+| --- | --- |
+| `TASKS_MCP_ENABLED` | `true`: on. `false`: off, and `/mcp` answers 404 exactly like a route that does not exist, even if credentials are present. Unset or blank: on only when `TASKS_MCP_CREDENTIALS_JSON` is set (existing deployments that already have credentials keep working; a new install stays off). Any other value is a configuration error and fails closed; it is never read as on. |
+| `TASKS_MCP_CREDENTIALS_JSON` | The credential registry (below). A secret. |
+| `TASKS_MCP_AUTH_MODE` | `gateway-and-token` (default) or `token`. |
+| `TASKS_MCP_GATEWAY_SECRET` | At least 32 characters. Required by `gateway-and-token` only. |
+
+With `TASKS_MCP_ENABLED=true`, a missing or invalid setting keeps `/mcp` answering 503
+`{"error":"not_configured"}`. Under `ENVIRONMENT=production` startup exits non-zero and names the
+variables (never their values); elsewhere the server starts and `/readyz` answers 503 naming them. The
+agent API that the MCP tools call (`/api/agent/v1/*`) follows the same switch.
+
+**Authentication modes.** `token` is the simplest and is meant for a server you reach directly or
+through an ordinary TLS reverse proxy: the client sends its credential as
+`Authorization: Bearer <token>` (or in the `X-Tasks-MCP-Token` header) and nothing else is needed. You must
+choose it explicitly; nothing falls back to it. `gateway-and-token` is for a deployment whose `/mcp`
+sits behind a private gateway: the gateway injects a second secret in a header and the application
+requires both it and the client token, so a leaked client token is useless from the public hostname.
+Removing the gateway secret never relaxes `gateway-and-token`; it stops answering until the secret is
+restored. In both modes tokens are compared in constant time, a credential may be `read` (list, search,
+get) or `read_write`, and an optional `expiresAt` ends it.
+
+**Create a credential.** The command below generates a 256-bit token, prints it once, and prints the
+registry entry. It reads no secrets and writes nothing unless you give `--output`
+(a one-entry registry file, mode 0600, never overwritten). In the container image, run
+`node dist/mcp-create-credential.js` with the same options.
+
+```sh
+npm run mcp:create-credential -- --name "My laptop" --scope read_write
+# optional: --runtime <label> --client-id <id> --expires-in-days <n> --output <path>
+```
+
+The registry is `{"version":1,"credentials":[ <entry>, ... ]}` with up to 32 entries; each entry has
+`clientId`, `name`, `role` (`Agent`), `runtime`, `scope`, `token` (32 characters or more) and an optional
+`expiresAt` (epoch seconds). The token is stored as written, so the registry is a secret: supply it
+as the value of `TASKS_MCP_CREDENTIALS_JSON`, never commit it, and rotate by adding a new entry,
+moving clients, and removing the old one.
+
+**Turn it on (token mode).**
+
+```sh
+TASKS_MCP_ENABLED=true
+TASKS_MCP_AUTH_MODE=token
+TASKS_MCP_CREDENTIALS_JSON='{"version":1,"credentials":[ ...entry from the command... ]}'
+```
+
+The endpoint is `<TASKS_PUBLIC_ORIGIN>/mcp`. It accepts only the host of `TASKS_PUBLIC_ORIGIN`
+(DNS-rebinding protection), so a reverse proxy must forward the original `Host` header. Serve it over
+HTTPS: in token mode the bearer token is the only credential. Check it:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://tasks.example.org/mcp   # 401 without a token
+```
+
+**Client configuration.** Claude Code (`.mcp.json`, with the token in the environment):
+
+```json
+{
+  "mcpServers": {
+    "tasks": {
+      "type": "http",
+      "url": "https://tasks.example.org/mcp",
+      "headers": { "Authorization": "Bearer ${TASKS_MCP_TOKEN}" }
+    }
+  }
+}
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.tasks]
+url = "https://tasks.example.org/mcp"
+bearer_token_env_var = "TASKS_MCP_TOKEN"
+```
+
+Every mutation takes an `idempotencyKey` so a retry cannot repeat it. Actions are attributed to a
+non-login `Agent` principal and recorded in the audit log.
 
 ### Scheduler
 
@@ -129,6 +244,40 @@ SQLite's backup API (for example `sqlite3 /data/tasks.db ".backup '/backup/tasks
 the container, replacing both, and starting it (pending migrations then apply). Test a restore
 before relying on it.
 
+## Roles and user administration
+
+Migration `0020_roles.sql` adds roles: named sets of the existing permission keys. A person's effective
+permissions are the union of their direct grants (`user_permissions`) and the permissions of every role
+they hold; a role containing `platform.admin` confers every permission, like the direct grant (a direct
+`platform.admin` grant also expands to every permission on read, whatever copy rows exist). Four built-in
+roles are seeded and assigned to nobody: `admin` (every permission), `manager` (`tasks.view`,
+`tasks.comment`, `tasks.personal`, `tasks.manage`), `member` (`tasks.view`, `tasks.comment`,
+`tasks.personal`) and `viewer` (`tasks.view`, read-only). Custom roles are created, edited and deleted by
+platform administrators; nobody can hand out access they do not hold, whether through a role or through
+the access switches when editing or inviting a person (task managers may additionally grant event
+permissions), task managers cannot modify platform administrators, and the last active platform
+administrator cannot be disabled, demoted or removed. Every change is written to the audit log; task
+managers do not see audit events about personal-project tasks and comments.
+
+Roles are real, not decorative. Every ordinary person holds the baseline permissions `tasks.view`,
+`tasks.comment`, `tasks.personal`, `events.view` and `events.create` as direct grants (the creation
+trigger and first sign-in add them). **Assigning a role to a person (one at a time, in bulk, or when
+inviting) removes their direct grants of exactly those five permissions in the same atomic batch, and the
+audit entry lists what was removed.** From then on their roles alone decide the baseline: a Viewer can
+read but not comment, and removing Member takes access away on the person's next request. Sign-in
+provisioning and administrator edits never add the baseline to a person who holds any role. Management
+permissions (`tasks.manage`, `events.manage`, `events.approve`, `platform.admin`) are never touched by
+role assignment. People with no role behave exactly as before: the migration does not rewrite any
+existing row, and assignment is the only way a person moves to role-based access. An administrator may
+remove a person's last role (the console says so first); they keep only the direct grants they still have,
+and because they then hold no role, a later sign-in may add the baseline back for them like for any
+other person without a role.
+
+Administration (people directory with search, filters and paging, bulk invite and bulk actions, roles,
+audit log) is served under `/api/admin/*` and the `/admin` page of the legacy API; it does not exist in
+portable mode and answers 404 when the profile disables user administration. Code that checks
+permissions in SQL must read `effective_user_permissions`, not `user_permissions`.
+
 ## D1 compatibility of the SQLite driver
 
 The driver is held to D1's observable behaviour by the shared contract in `tests/platform/`, which runs
@@ -156,6 +305,11 @@ the same assertions on workerd D1 and on `node:sqlite`:
   host and one filesystem. Do not run two containers against the same file, and do not put the file on
   a network filesystem. There is no high-availability story; restore from backup.
 - Event assets are read into memory on download; the filesystem store is meant for small files.
+  Uploads are limited to PNG, JPEG, WebP and PDF up to 50 MB, and every `/api` request body to 1 MiB
+  (50 MiB plus form overhead for an upload), checked before the body is parsed.
+- **No rate limiting.** Apply request limits at your reverse proxy or in front of the Worker.
+- Sessions are stateless signed cookies (12 hours); disabling a user ends their access at once, but
+  signing out only clears the cookie.
 - **Sign-in is Google or a trusted proxy.** See [Sign-in](#sign-in). This mode adds no passwords and
   no other identity provider; a different provider means supplying a tenant adapter
   (`src/runtime/tenant-adapters.ts`).
@@ -163,7 +317,7 @@ the same assertions on workerd D1 and on `node:sqlite`:
 
 ### What Postgres would take
 
-The 21 source files that use `env.DB` issue about 260 SQLite-dialect statements. A Postgres port needs
+The 23 source files that use `env.DB` issue about 250 SQLite-dialect statements. A Postgres port needs
 a `SqlDatabase` implementation plus dialect work that a driver cannot hide: `strftime(...)` defaults
 and comparisons, `INSERT OR IGNORE` / `INSERT OR REPLACE` (to `ON CONFLICT`), `AUTOINCREMENT` and
 `last_row_id` (to identity columns and `RETURNING`), `?` placeholders (to `$n`), `COLLATE NOCASE`

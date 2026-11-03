@@ -22,6 +22,12 @@ function fakeEnv(users: FakeUser[]) {
   const prepare = (sql: string) => {
     let values: unknown[] = [];
     const statement = {
+      get sql() {
+        return sql;
+      },
+      get values() {
+        return values;
+      },
       bind(...next: unknown[]) {
         values = next;
         return statement;
@@ -49,7 +55,10 @@ function fakeEnv(users: FakeUser[]) {
             is_platform_admin: Number(user.permissions.includes('platform.admin')),
           };
         }
-        if (sql.includes('FROM user_permissions') && sql.includes("IN (?, 'platform.admin')")) {
+        if (
+          sql.includes('FROM effective_user_permissions') &&
+          sql.includes("IN (?, 'platform.admin')")
+        ) {
           const user = byId(values[0]);
           return user?.permissions.some((p) => p === values[1] || p === 'platform.admin')
             ? { allowed: 1 }
@@ -74,8 +83,13 @@ function fakeEnv(users: FakeUser[]) {
   };
   const DB = {
     prepare,
-    batch: async (statements: unknown[]) => {
+    batch: async (statements: Array<{ sql?: string; values?: unknown[] }>) => {
       writes.push('batch');
+      for (const statement of statements) {
+        if (statement.sql?.startsWith('UPDATE users SET') && statement.values) {
+          updateBinds.push(statement.values);
+        }
+      }
       return statements.map(() => ({ success: true }));
     },
   };

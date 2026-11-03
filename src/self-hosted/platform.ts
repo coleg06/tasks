@@ -147,6 +147,8 @@ export async function openSelfHostedPlatform(config: PlatformConfig): Promise<Se
  * different identity provider means a different tenant adapter (and a different list). Only
  * variable names are ever reported, never values.
  */
+export const MINIMUM_SESSION_SECRET_LENGTH = 32;
+
 export const SESSION_IDENTITY_VARIABLES = [
   'SESSION_SECRET',
   'GOOGLE_CLIENT_ID',
@@ -172,6 +174,8 @@ export function missingIdentityVariables(source: NodeJS.ProcessEnv | Env): strin
   if (configuredAuthMode(modeSettings) !== 'session') return authModeProblems(modeSettings);
   return SESSION_IDENTITY_VARIABLES.filter((name) => {
     const value = values[name];
-    return typeof value !== 'string' || value.trim() === '';
+    if (typeof value !== 'string' || value.trim() === '') return true;
+    // A short signing key can be guessed, and anyone holding it can forge any user's session.
+    return name === 'SESSION_SECRET' && value.trim().length < MINIMUM_SESSION_SECRET_LENGTH;
   });
 }

@@ -192,8 +192,10 @@ describe.runIf(
     expect(first.status).toBe(200);
     const body = (await first.json()) as {
       permissions: string[];
+      release: string;
       user: { email: string; first_name: string };
     };
+    expect(body.release).toBe('test');
     expect(body.user).toMatchObject({ email: 'admin@example.org', first_name: 'Ada' });
     expect(body.permissions).toEqual(expect.arrayContaining(['tasks.manage', 'platform.admin']));
     const users = await database

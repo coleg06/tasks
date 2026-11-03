@@ -110,8 +110,12 @@ export const eventWorkItemCreateSchema = z.object({
   responsibilityKey: z.string().min(1).max(80).nullable().default(null),
 });
 
+// Stored links are rendered as hyperlinks and handed to other clients, so only web addresses are
+// accepted; a `javascript:` or `data:` URL is rejected at the API.
+const httpUrl = z.url({ protocol: /^https?$/ }).max(2000);
+
 const optionalUrl = z
-  .union([z.url().max(2000), z.literal('')])
+  .union([httpUrl, z.literal('')])
   .transform((value) => value || null)
   .nullable();
 
@@ -122,7 +126,7 @@ export const eventSourceSchema = z
   .object({
     system: z.string().trim().min(1).max(60),
     id: z.string().trim().min(1).max(240),
-    url: z.url().max(2000).nullable().optional(),
+    url: httpUrl.nullable().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .nullable()
@@ -297,7 +301,7 @@ export const copyVersionMutationSchema = z.object({
 });
 
 export const assetVersionMutationSchema = z.object({
-  url: z.url().max(2000),
+  url: httpUrl,
   label: z.string().trim().max(240),
   storageProvider: z.string().trim().max(80).nullable(),
   providerFileId: z.string().trim().max(500).nullable(),

@@ -232,14 +232,14 @@ export const D1_PROJECT_ACCESS = `EXISTS (
       (p.project_type = 'personal' AND p.personal_owner_user_id = access_wm.user_id)
       OR (p.project_type = 'shared' AND (
         EXISTS (
-          SELECT 1 FROM user_permissions shared_view_up
+          SELECT 1 FROM effective_user_permissions shared_view_up
           WHERE shared_view_up.user_id = access_wm.user_id
             AND shared_view_up.permission_key IN ('tasks.view', 'platform.admin')
         ) AND (
           p.visibility = 'workspace'
           OR access_wm.role IN ('owner', 'admin')
           OR EXISTS (
-            SELECT 1 FROM user_permissions access_up
+            SELECT 1 FROM effective_user_permissions access_up
             WHERE access_up.user_id = access_wm.user_id
               AND access_up.permission_key = 'tasks.manage'
           )
@@ -262,14 +262,14 @@ export const D1_PROJECT_EDIT_ACCESS = `EXISTS (
       (p.project_type = 'personal' AND p.personal_owner_user_id = edit_wm.user_id)
       OR (p.project_type = 'shared' AND (
         EXISTS (
-          SELECT 1 FROM user_permissions shared_edit_view_up
+          SELECT 1 FROM effective_user_permissions shared_edit_view_up
           WHERE shared_edit_view_up.user_id = edit_wm.user_id
             AND shared_edit_view_up.permission_key IN ('tasks.view', 'platform.admin')
         ) AND (
           edit_wm.role IN ('owner', 'admin')
           OR edit_pm.role IN ('owner', 'editor')
           OR EXISTS (
-            SELECT 1 FROM user_permissions edit_up
+            SELECT 1 FROM effective_user_permissions edit_up
             WHERE edit_up.user_id = edit_wm.user_id AND edit_up.permission_key = 'tasks.manage'
           )
         )
@@ -933,7 +933,7 @@ export class D1TaskReadBackend implements D1TaskBackendReads, D1TaskWorkspaceBac
       .first<{ id: number }>();
     const commentAccess = await this.db
       .prepare(
-        `SELECT 1 AS allowed FROM user_permissions
+        `SELECT 1 AS allowed FROM effective_user_permissions
          WHERE user_id = ? AND permission_key = 'tasks.comment'`,
       )
       .bind(userId)
@@ -941,7 +941,7 @@ export class D1TaskReadBackend implements D1TaskBackendReads, D1TaskWorkspaceBac
     const commentManageAccess = options.comments
       ? await this.db
           .prepare(
-            `SELECT 1 AS allowed FROM user_permissions
+            `SELECT 1 AS allowed FROM effective_user_permissions
              WHERE user_id = ? AND permission_key = 'tasks.manage'`,
           )
           .bind(userId)
@@ -999,21 +999,21 @@ export class D1TaskReadBackend implements D1TaskBackendReads, D1TaskWorkspaceBac
              w.workspace_key, w.name AS workspace_name,
              wm.role AS workspace_role, pm.role AS member_role,
              EXISTS(
-               SELECT 1 FROM user_permissions admin_up
+               SELECT 1 FROM effective_user_permissions admin_up
                WHERE admin_up.user_id = wm.user_id AND admin_up.permission_key = 'tasks.manage'
              ) AS is_task_admin,
              CASE WHEN
                (p.project_type = 'personal' AND p.personal_owner_user_id = wm.user_id)
                OR (p.project_type = 'shared' AND (
                  EXISTS(
-                   SELECT 1 FROM user_permissions shared_edit_view_up
+                   SELECT 1 FROM effective_user_permissions shared_edit_view_up
                    WHERE shared_edit_view_up.user_id = wm.user_id
                      AND shared_edit_view_up.permission_key IN ('tasks.view', 'platform.admin')
                  ) AND (
                    wm.role IN ('owner','admin')
                    OR pm.role IN ('owner','editor')
                    OR EXISTS(
-                     SELECT 1 FROM user_permissions edit_up
+                     SELECT 1 FROM effective_user_permissions edit_up
                      WHERE edit_up.user_id = wm.user_id AND edit_up.permission_key = 'tasks.manage'
                    )
                  )
@@ -1028,7 +1028,7 @@ export class D1TaskReadBackend implements D1TaskBackendReads, D1TaskWorkspaceBac
                (p.project_type = 'personal' AND p.personal_owner_user_id = wm.user_id)
                OR (p.project_type = 'shared' AND (
                  EXISTS(
-                   SELECT 1 FROM user_permissions shared_view_up
+                   SELECT 1 FROM effective_user_permissions shared_view_up
                    WHERE shared_view_up.user_id = wm.user_id
                      AND shared_view_up.permission_key IN ('tasks.view', 'platform.admin')
                  ) AND (
@@ -1036,7 +1036,7 @@ export class D1TaskReadBackend implements D1TaskBackendReads, D1TaskWorkspaceBac
                    OR wm.role IN ('owner','admin')
                    OR pm.user_id IS NOT NULL
                    OR EXISTS(
-                     SELECT 1 FROM user_permissions access_up
+                     SELECT 1 FROM effective_user_permissions access_up
                      WHERE access_up.user_id = wm.user_id AND access_up.permission_key = 'tasks.manage'
                    )
                  )

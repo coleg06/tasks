@@ -5,13 +5,28 @@ import type { SqlStatement } from '../platform/ports';
 import { isInitialAdminEmail, mayCreateUserOnSignIn } from '../runtime/identity-config';
 
 /**
+ * Adds a baseline permission as a direct grant, but only while the user holds no role: a user with
+ * a role gets the baseline from their roles alone (see BASELINE_PERMISSIONS in admin/rbac.ts).
+ *
+ * Known consequence: if an administrator removes a person's last role, the next sign-in sees a user
+ * without roles and re-adds the baseline for them, exactly as for any other user without roles.
+ */
+function baselineGrant(env: Env, userId: number, permission: string) {
+  return env.DB.prepare(
+    `INSERT OR IGNORE INTO user_permissions (user_id, permission_key)
+     SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM user_roles WHERE user_id = ?)`,
+  ).bind(userId, permission, userId);
+}
+
+/**
  * Tenant membership and first-sign-in grants for a user whose identity was just established
  * (Google sign-in or a trusted upstream proxy). Idempotent. A user with no existing task
- * access gains none unless they are the configured initial administrator.
+ * access gains none unless they are the configured initial administrator. A user who holds any
+ * role is never given baseline grants here; their roles decide those permissions.
  */
 export async function provisionSignedInUser(env: Env, user: { id: number; email: string }) {
   const existingTaskAccess = await env.DB.prepare(
-    `SELECT 1 AS allowed FROM user_permissions
+    `SELECT 1 AS allowed FROM effective_user_permissions
      WHERE user_id = ? AND permission_key LIKE 'tasks.%' LIMIT 1`,
   )
     .bind(user.id)
@@ -25,27 +40,15 @@ export async function provisionSignedInUser(env: Env, user: { id: number; email:
   ];
   if (resolveRuntimeFeatures(env.FEATURE_MODULES).events) {
     tenantAccessStatements.push(
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO user_permissions (user_id, permission_key)
-         VALUES (?, 'events.view')`,
-      ).bind(user.id),
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO user_permissions (user_id, permission_key)
-         VALUES (?, 'events.create')`,
-      ).bind(user.id),
+      baselineGrant(env, user.id, 'events.view'),
+      baselineGrant(env, user.id, 'events.create'),
     );
   }
   await env.DB.batch(tenantAccessStatements);
   if (existingTaskAccess || isInitialAdmin) {
     await env.DB.batch([
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO user_permissions (user_id, permission_key)
-         VALUES (?, 'tasks.view')`,
-      ).bind(user.id),
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO user_permissions (user_id, permission_key)
-         VALUES (?, 'tasks.comment')`,
-      ).bind(user.id),
+      baselineGrant(env, user.id, 'tasks.view'),
+      baselineGrant(env, user.id, 'tasks.comment'),
       env.DB.prepare(
         `INSERT OR IGNORE INTO project_members (project_id, user_id, role)
          SELECT id, ?, 'viewer' FROM projects WHERE project_key = ?`,

@@ -1,6 +1,7 @@
-# Minimal oauth2-proxy configuration (copy to oauth2-proxy.cfg and fill in). oauth2-proxy sets
-# X-Forwarded-User and X-Forwarded-Email on every request it forwards and overwrites any value
-# the client sent.
+# Minimal oauth2-proxy configuration (copy to oauth2-proxy.cfg and fill in). With
+# pass_user_headers, oauth2-proxy sets X-Forwarded-User and X-Forwarded-Email on the requests it
+# forwards, which is what TASKS_TRUSTED_UPSTREAM_EMAIL_HEADER names. Check your proxy's version
+# and settings to confirm it overwrites, never passes through, a value the client sent.
 provider = "google"
 client_id = "replace-with-your-client-id.apps.googleusercontent.com"
 client_secret = "replace-with-your-client-secret"

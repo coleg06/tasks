@@ -30,6 +30,10 @@ export interface Env {
   PORTAL_SUPPORT_INGEST_SECRET?: string;
   RELEASE_SHA: string;
   TASKS_GATEWAY_ASSERTION_SECRET?: string;
+  /** `true`/`false`. Unset: MCP is on only when `TASKS_MCP_CREDENTIALS_JSON` is set. */
+  TASKS_MCP_ENABLED?: string;
+  /** `gateway-and-token` (default) or `token` (client credential only, chosen explicitly). */
+  TASKS_MCP_AUTH_MODE?: string;
   TASKS_MCP_CREDENTIALS_JSON?: string;
   TASKS_MCP_GATEWAY_SECRET?: string;
   TASK_ALERT_PUBLISHER_SECRET?: string;

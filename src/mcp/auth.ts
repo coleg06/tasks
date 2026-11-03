@@ -1,29 +1,15 @@
-import { z } from 'zod';
 import { tenantProfile } from '../../shared/tenant-profile';
 import { constantTimeEqual } from '../auth/google';
 import type { Env } from '../env';
 import { sha256Hex } from '../mobile/assertion';
+import { mcpAuthMode } from './config';
+import { type McpCredential, parseCredentialRegistry } from './credentials';
 
 export const MCP_GATEWAY_HEADER = tenantProfile.mcp.gatewayHeader;
 export const MCP_CLIENT_HEADER = tenantProfile.mcp.clientHeader;
 export const MCP_AGENT_EMAIL = tenantProfile.agent.email;
 
-const credentialSchema = z.object({
-  clientId: z.string().regex(/^[a-z0-9][a-z0-9._-]{2,63}$/),
-  name: z.string().trim().min(1).max(100),
-  role: z.literal('Agent'),
-  runtime: z.string().regex(/^[a-z0-9][a-z0-9._-]{1,31}$/),
-  scope: z.enum(['read', 'read_write']),
-  token: z.string().min(32).max(512),
-  expiresAt: z.number().int().positive().optional(),
-});
-
-const credentialsSchema = z.object({
-  version: z.literal(1),
-  credentials: z.array(credentialSchema).min(1).max(32),
-});
-
-export type McpClientIdentity = Omit<z.infer<typeof credentialSchema>, 'token'>;
+export type McpClientIdentity = Omit<McpCredential, 'token'>;
 
 export class McpAuthenticationError extends Error {
   constructor(
@@ -55,24 +41,25 @@ export async function authenticateMcpRequest(
   env: Env,
   now = Math.floor(Date.now() / 1000),
 ): Promise<McpClientIdentity> {
-  const gatewaySecret = env.TASKS_MCP_GATEWAY_SECRET ?? '';
+  const mode = mcpAuthMode(env);
   const credentialsJson = env.TASKS_MCP_CREDENTIALS_JSON ?? '';
-  if (gatewaySecret.length < 32 || !credentialsJson) {
+  if (mode === 'invalid' || !credentialsJson) {
     throw new McpAuthenticationError('not_configured', 503);
   }
-  if (!(await tokenMatches(request.headers.get(MCP_GATEWAY_HEADER) ?? '', gatewaySecret))) {
-    throw new McpAuthenticationError('gateway_rejected', 403);
+  if (mode === 'gateway-and-token') {
+    // Fail closed: a missing or short gateway secret never downgrades to token-only access.
+    const gatewaySecret = env.TASKS_MCP_GATEWAY_SECRET ?? '';
+    if (gatewaySecret.length < 32) throw new McpAuthenticationError('not_configured', 503);
+    if (!(await tokenMatches(request.headers.get(MCP_GATEWAY_HEADER) ?? '', gatewaySecret))) {
+      throw new McpAuthenticationError('gateway_rejected', 403);
+    }
   }
 
-  let parsed: z.infer<typeof credentialsSchema>;
-  try {
-    parsed = credentialsSchema.parse(JSON.parse(credentialsJson));
-  } catch {
-    throw new McpAuthenticationError('not_configured', 503);
-  }
+  const parsed = parseCredentialRegistry(credentialsJson);
+  if (!parsed) throw new McpAuthenticationError('not_configured', 503);
 
   const suppliedToken = bearerToken(request);
-  let matched: z.infer<typeof credentialSchema> | undefined;
+  let matched: McpCredential | undefined;
   for (const credential of parsed.credentials) {
     if (await tokenMatches(suppliedToken, credential.token)) matched = credential;
   }

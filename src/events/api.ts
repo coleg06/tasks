@@ -2064,7 +2064,7 @@ export async function createAssetVersion(context: AppContext) {
 }
 
 const uploadTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
-const maximumAssetBytes = 50 * 1024 * 1024;
+export const maximumAssetBytes = 50 * 1024 * 1024;
 
 export function validateAssetUpload(file: { size: number; type: string }) {
   if (file.size <= 0) return 'asset_empty';

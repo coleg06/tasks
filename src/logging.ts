@@ -46,6 +46,8 @@ export function requestIdFor(context: Context<LoggingAppEnv>) {
 }
 
 export async function recordOperationalEvent(env: Env, input: OperationalEvent) {
+  // Deployments with an external backend have no local database to record into.
+  if (!env.DB) return;
   try {
     await env.DB.prepare(
       `INSERT INTO operational_events (

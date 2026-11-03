@@ -73,6 +73,17 @@ export function describeAppScenario(label: string, open: () => Promise<AppBacken
       await backend?.dispose();
     });
 
+    it('reports the release on the session bootstrap', async () => {
+      const configured = { ...env, GOOGLE_CLIENT_ID: 'scenario', GOOGLE_CLIENT_SECRET: 'scenario' };
+      const response = await app.request(
+        `${ORIGIN}/api/bootstrap`,
+        { headers: headers() },
+        configured as Env,
+      );
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { release?: string }).release).toBe('scenario');
+    });
+
     it('commits a task PATCH instead of reporting a version conflict', async () => {
       const created = await call('/api/tasks', {
         method: 'POST',

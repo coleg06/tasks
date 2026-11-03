@@ -1,7 +1,8 @@
 # Self-hosted Tasks with Google sign-in, SQLite and filesystem storage.
 #   cp tasks.env.example tasks.env   # then edit tasks.env
 #   docker compose up --build
-# The application listens on http://localhost:8080.
+# The application listens on http://localhost:8080. Put TLS and request rate limits in a reverse
+# proxy in front of it for anything beyond a trial; the application has no rate limiting.
 services:
   tasks:
     build:

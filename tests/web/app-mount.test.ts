@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tenantProfile } from '../../shared/tenant-profile';
 import { tenantEventVocabulary } from '../../shared/tenant-profile-support';
+import { TASKS_RELEASE_VERSION } from '../../shared/version';
 import { router } from '../../web/src/router';
 
 /**
@@ -134,6 +135,7 @@ describe('application mount', () => {
           ? {
               authConfigured: true,
               permissions: ['tasks.view', 'tasks.manage'],
+              release: '638b9a6f0e1d2c3b4a5968778695a4b3c2d1e0f9',
               user: {
                 id: 1,
                 email: 'admin@example.org',
@@ -195,6 +197,12 @@ describe('application mount', () => {
 
     expect(container.textContent).toContain('Replace the conference room projector lamp');
     expect(container.querySelector('.tasks-sidebar')).not.toBeNull();
+    const versionLine = container.querySelector<HTMLElement>('.tasks-account .account-version');
+    expect(versionLine?.textContent).toBe(
+      `${tenantProfile.productName} ${TASKS_RELEASE_VERSION} · 638b9a6`,
+    );
+    expect(versionLine?.title).toContain('638b9a6f0e1d2c3b4a5968778695a4b3c2d1e0f9');
+    expect(versionLine?.previousElementSibling?.classList.contains('account-trigger')).toBe(true);
     const sidebarNavigation = container.querySelector<HTMLElement>('.tasks-sidebar-top');
     expect(sidebarNavigation?.classList.contains('is-scrolling')).toBe(false);
     await act(async () => sidebarNavigation?.dispatchEvent(new Event('scroll', { bubbles: true })));
@@ -751,7 +759,7 @@ describe('application mount', () => {
                 photo_url: null,
               },
             }
-          : url === '/api/admin'
+          : url.startsWith('/api/admin?')
             ? {
                 stats: { users: 2, projects: 1, tasks: 12, comments: 3 },
                 users: [],
@@ -820,9 +828,16 @@ describe('application mount', () => {
       }),
     );
 
+    // Delivery health lives on the Overview tab of the administration page.
     root = mount(container);
     await act(async () => {
       await router.navigate({ to: '/admin', search: { view: 'open' } });
+    });
+    await settle(() => container.querySelector('[role="tab"]') !== null);
+    await act(async () => {
+      Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'))
+        .find((tab) => tab.textContent === 'Overview')
+        ?.click();
     });
     await settle(() => container.textContent?.includes('Notification delivery') ?? false);
 
@@ -834,5 +849,6 @@ describe('application mount', () => {
     expect(container.textContent).toContain('Operational logs');
     expect(container.textContent).toContain('Event workspace failed to render');
     expect(container.textContent).toContain('Request request-123');
+    window.history.replaceState(null, '', '#');
   });
 });

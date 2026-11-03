@@ -165,7 +165,7 @@ async function canReceiveTaskNotification(env: Env, userId: number, taskKey: str
      LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = wm.user_id
      WHERE t.task_key = ? AND t.archived_at IS NULL AND p.archived_at IS NULL
        AND EXISTS (
-         SELECT 1 FROM user_permissions view_up
+         SELECT 1 FROM effective_user_permissions view_up
          WHERE view_up.user_id = wm.user_id
            AND view_up.permission_key IN ('tasks.view', 'tasks.personal', 'platform.admin')
        )
@@ -173,7 +173,7 @@ async function canReceiveTaskNotification(env: Env, userId: number, taskKey: str
          (p.project_type = 'personal' AND p.personal_owner_user_id = wm.user_id)
          OR (p.project_type = 'shared' AND (
            EXISTS (
-             SELECT 1 FROM user_permissions shared_view_up
+             SELECT 1 FROM effective_user_permissions shared_view_up
              WHERE shared_view_up.user_id = wm.user_id
                AND shared_view_up.permission_key IN ('tasks.view', 'platform.admin')
            ) AND (
@@ -181,7 +181,7 @@ async function canReceiveTaskNotification(env: Env, userId: number, taskKey: str
              OR wm.role IN ('owner','admin')
              OR pm.user_id IS NOT NULL
              OR EXISTS (
-               SELECT 1 FROM user_permissions manage_up
+               SELECT 1 FROM effective_user_permissions manage_up
                WHERE manage_up.user_id = wm.user_id AND manage_up.permission_key = 'tasks.manage'
              )
            )
@@ -223,7 +223,7 @@ export function taskNotificationOutboxStatement(
        AND (? IS NULL OR u.id <> ?)
        AND t.archived_at IS NULL AND project.archived_at IS NULL AND t.version = ?
        AND EXISTS (
-         SELECT 1 FROM user_permissions view_up
+         SELECT 1 FROM effective_user_permissions view_up
          WHERE view_up.user_id = u.id
            AND view_up.permission_key IN ('tasks.view', 'tasks.personal', 'platform.admin')
        )
@@ -231,7 +231,7 @@ export function taskNotificationOutboxStatement(
          (project.project_type = 'personal' AND project.personal_owner_user_id = u.id)
          OR (project.project_type = 'shared' AND (
            EXISTS (
-             SELECT 1 FROM user_permissions shared_view_up
+             SELECT 1 FROM effective_user_permissions shared_view_up
              WHERE shared_view_up.user_id = u.id
                AND shared_view_up.permission_key IN ('tasks.view', 'platform.admin')
            ) AND (
@@ -239,7 +239,7 @@ export function taskNotificationOutboxStatement(
              OR wm.role IN ('owner','admin')
              OR pm.user_id IS NOT NULL
              OR EXISTS (
-               SELECT 1 FROM user_permissions manage_up
+               SELECT 1 FROM effective_user_permissions manage_up
                WHERE manage_up.user_id = u.id AND manage_up.permission_key = 'tasks.manage'
              )
            )
