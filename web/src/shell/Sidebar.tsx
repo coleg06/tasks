@@ -63,6 +63,10 @@ export function Sidebar() {
     ) ?? false;
   const canViewEvents =
     features.events && (bootstrap.data?.permissions.includes('events.view') ?? false);
+  const canAdminister = canManage && tenantProfile.tasks.userAdministration;
+  const hasPreferences = tenantProfile.tasks.accountPreferences && (canViewTasks || canViewEvents);
+  // A divider separates Sign out from other items; alone in the menu it separates nothing.
+  const hasAccountLinks = canAdminister || hasPreferences || tenantProfile.capabilities.portal;
   const canViewAnalytics =
     features.workflowAnalytics &&
     (bootstrap.data?.permissions.some((permission) =>
@@ -210,7 +214,7 @@ export function Sidebar() {
               side="top"
               sideOffset={6}
             >
-              {canManage && tenantProfile.tasks.userAdministration ? (
+              {canAdminister ? (
                 <DropdownMenu.Item asChild className="menu-item">
                   <Link search={mergeSearch({})} to="/admin">
                     <span className="menu-item-icon">
@@ -220,7 +224,7 @@ export function Sidebar() {
                   </Link>
                 </DropdownMenu.Item>
               ) : null}
-              {tenantProfile.tasks.accountPreferences && (canViewTasks || canViewEvents) ? (
+              {hasPreferences ? (
                 <DropdownMenu.Item className="menu-item" onSelect={() => setPreferencesOpen(true)}>
                   <span className="menu-item-icon">
                     <SlidersHorizontal aria-hidden="true" />
@@ -238,7 +242,7 @@ export function Sidebar() {
                   </a>
                 </DropdownMenu.Item>
               ) : null}
-              <DropdownMenu.Separator className="menu-separator" />
+              {hasAccountLinks ? <DropdownMenu.Separator className="menu-separator" /> : null}
               <DropdownMenu.Item
                 className="menu-item"
                 onSelect={() => signOutForm.current?.submit()}
