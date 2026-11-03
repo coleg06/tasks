@@ -125,3 +125,7 @@ This repository is published from a maintained source tree as an unrelated-histo
 release (`PUBLIC-SOURCE.json` records the version; `PUBLIC-FILES.sha256` the file digests). Pull
 requests are welcome and are reviewed and merged by the maintainers before the next release.
 See [SECURITY.md](SECURITY.md) to report vulnerabilities and [LICENSE](LICENSE) for the MIT terms.
+
+## Contributing
+
+Pull requests are welcome. Accepted changes are reviewed and released through a tagged publish.
