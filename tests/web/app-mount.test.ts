@@ -197,12 +197,7 @@ describe('application mount', () => {
 
     expect(container.textContent).toContain('Replace the conference room projector lamp');
     expect(container.querySelector('.tasks-sidebar')).not.toBeNull();
-    const versionLine = container.querySelector<HTMLElement>('.tasks-account .account-version');
-    expect(versionLine?.textContent).toBe(
-      `${tenantProfile.productName} ${TASKS_RELEASE_VERSION} · 638b9a6`,
-    );
-    expect(versionLine?.title).toContain('638b9a6f0e1d2c3b4a5968778695a4b3c2d1e0f9');
-    expect(versionLine?.previousElementSibling?.classList.contains('account-trigger')).toBe(true);
+    expect(document.querySelector('.account-version')).toBeNull();
     const sidebarNavigation = container.querySelector<HTMLElement>('.tasks-sidebar-top');
     expect(sidebarNavigation?.classList.contains('is-scrolling')).toBe(false);
     await act(async () => sidebarNavigation?.dispatchEvent(new Event('scroll', { bubbles: true })));
@@ -282,6 +277,13 @@ describe('application mount', () => {
       expect(document.querySelector(portalSelector)).toBeNull();
     }
     expect(document.querySelector('form[action="/auth/logout"]')).not.toBeNull();
+
+    await settle(() => document.querySelector('.account-menu .account-version') !== null);
+    const versionLine = document.querySelector<HTMLElement>('.account-menu .account-version');
+    expect(versionLine?.textContent).toBe(
+      `${tenantProfile.productName} ${TASKS_RELEASE_VERSION} · 638b9a6`,
+    );
+    expect(versionLine?.title).toContain('638b9a6f0e1d2c3b4a5968778695a4b3c2d1e0f9');
 
     // Radix portals to document.body and locks interaction outside the menu;
     // leaving it open would follow this test into the next one.

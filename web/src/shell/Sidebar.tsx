@@ -252,13 +252,13 @@ export function Sidebar() {
                 </span>
                 <span className="menu-item-label">Sign out</span>
               </DropdownMenu.Item>
+              <DropdownMenu.Separator className="menu-separator" />
+              <DropdownMenu.Label className="account-version" title={version.title}>
+                {version.text}
+              </DropdownMenu.Label>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
-
-        <p className="account-version" title={version.title}>
-          {version.text}
-        </p>
 
         {/* Sign-out stays a browser navigation so the active identity provider
             owns session invalidation rather than the UI imitating it. */}

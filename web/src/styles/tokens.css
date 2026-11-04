@@ -166,7 +166,7 @@ input[type="date"]::-webkit-datetime-edit {
   min-height: 0;
   flex: 0 0 var(--sidebar-width);
   flex-direction: column;
-  padding: var(--space-4) var(--space-3) var(--space-2);
+  padding: var(--space-4) var(--space-3) var(--space-3);
   border-right: 1px solid var(--border);
   background: var(--bg-subtle);
 }
@@ -379,19 +379,6 @@ input[type="date"]::-webkit-datetime-edit {
   overflow: hidden;
   color: var(--text-subtle);
   font-size: var(--text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Aligned with the identity text above (trigger padding + avatar + gap). */
-.account-version {
-  overflow: hidden;
-  margin: 2px 0 0;
-  padding: 0 var(--space-2) 0 calc(1px + var(--space-2) * 2 + 20px);
-  color: var(--text-subtle);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1140,6 +1127,19 @@ input[type="date"]::-webkit-datetime-edit {
   min-height: 34px;
   color: var(--text);
   text-decoration: none;
+}
+
+/* Reference information rather than an action, so it reads quieter than the
+   items above it and lines up with their icons. */
+.account-version {
+  overflow: hidden;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .menu-filter {
