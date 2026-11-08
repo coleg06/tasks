@@ -336,3 +336,31 @@ migrations from empty, CRUD, atomic batch rollback, `meta.changes`/`last_row_id`
 server with a temporary SQLite file and filesystem directory, checks `/readyz` and does an
 authenticated API round trip and an MCP call. There is no skip path for workerd: if it cannot run,
 the suite fails.
+
+
+### Optional design-request ingestion
+
+Legacy SQL deployments may add `integrations.portalDesign` in their source-controlled profile
+extension, with `projectKey`, `assigneeEmail`, `actorEmail`, and `environment` (`dev`, `production`,
+or `deployment` to use the Worker's `ENVIRONMENT`). The feature is off when absent. The optional `campusLabels` map supplies the exact nonempty campus keys and English display labels
+accepted by that deployment (empty campus is always valid). Set the dedicated
+`PORTAL_DESIGN_INGEST_SECRET` binding to at least 32 characters through the deployment's secret
+mechanism. Missing profile/secret returns 503; an invalid Bearer credential returns 401.
+
+`POST /api/integrations/portal/design-requests` accepts strict JSON v1, up to 128 KiB, with lane,
+submission UUID/time, requester name/email, locale, campus, canonical asset selections, free-text
+answers, a calendar due date and up to three PDF/PNG/JPEG file metadata entries. It creates a task
+only when the configured private shared project and active actor/assignee memberships are ready.
+Text answers are limited to 20,000 characters each; descriptions over 10,000 retain full text in
+Imported details. Files remain in the originating email; no file download broker is provided.
+
+The unique source UUID and immutable canonical payload hash provide replay safety: 201 on create,
+200 on an identical replay, 409 on a changed payload, 400 on invalid input and 503 on unavailable
+dependencies. Task, created event and audit commit atomically. Replays preserve human edits.
+`GET /api/integrations/portal/design-requests/health` uses the same Bearer credential and returns
+`{"ok":true}` only when the configured dependencies are ready, without creating anything.
+
+The response `task.url` uses `/r/portal-design-request/{submission_uuid}`. Route `/r/*` through the
+Worker before SPA assets. That stable URL uses the existing session sign-in/return path, redirects
+authorized viewers to the normal task detail, and gives authorized project members a no-store
+pending page until creation. Inaccessible or malformed requests share a generic not-found page.

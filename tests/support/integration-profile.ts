@@ -23,6 +23,13 @@ export function buildIntegrationProfile(base: TenantProfile): TenantProfile {
         ownerEmails: ['admin@example.org', 'owner2@example.org'],
         actorEmail: 'admin@example.org',
       },
+      portalDesign: {
+        campusLabels: { north: 'North', south: 'South' },
+        projectKey: 'DESIGN',
+        assigneeEmail: 'designer@example.org',
+        actorEmail: base.agent.email,
+        environment: 'dev',
+      },
       eventAssist: { allowedHosts: ['llm.example.org'] },
     },
     events: {

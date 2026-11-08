@@ -1,4 +1,5 @@
 import { Hono, type MiddlewareHandler } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { type RuntimeFeatures, resolveRuntimeFeatures } from '../shared/runtime-features';
 import { tenantPortalOrigin, tenantProfile } from '../shared/tenant-profile';
@@ -77,6 +78,12 @@ import { apiBodyLimit, securityHeaders } from './http-hardening';
 import { trustedUpstreamSettings, usesEnvTrustedUpstream } from './identity/auth-mode';
 import { resolveTasksIdentity } from './identity/context';
 import { trustedUpstreamIdentity } from './identity/trusted-upstream';
+import {
+  ingestPortalDesignRequest,
+  PORTAL_DESIGN_MAX_BYTES,
+  portalDesignHealth,
+  redirectPortalDesignRequest,
+} from './integrations/portal-design';
 import { ingestPortalSupportTicket, portalSupportHealth } from './integrations/portal-support';
 import { logApplicationError, logUnhandledError, requestLogger } from './logging';
 import { authenticateMcpRequest, McpAuthenticationError, mcpAuthErrorResponse } from './mcp/auth';
@@ -144,6 +151,13 @@ function requireRuntimeFeature(
 
 app.use('*', requestLogger);
 app.use('*', securityHeaders);
+app.use(
+  '/api/integrations/portal/design-requests',
+  bodyLimit({
+    maxSize: PORTAL_DESIGN_MAX_BYTES,
+    onError: (context) => context.json({ error: 'payload_too_large' }, 400),
+  }),
+);
 app.use('/api/*', apiBodyLimit(maximumAssetBytes));
 
 function isPortableApiPath(path: string) {
@@ -193,7 +207,8 @@ app.use('*', async (context, next) => {
     path === '/api' ||
     path.startsWith('/api/') ||
     path === '/auth' ||
-    path.startsWith('/auth/');
+    path.startsWith('/auth/') ||
+    path.startsWith('/r/');
   if (!requiresTenantConfiguration) {
     await next();
     return;
@@ -430,6 +445,9 @@ app.all('/mcp', async (context) => {
   }
 });
 
+app.get('/api/integrations/portal/design-requests/health', portalDesignHealth);
+app.post('/api/integrations/portal/design-requests', ingestPortalDesignRequest);
+app.get('/r/portal-design-request/:submissionId', redirectPortalDesignRequest);
 app.post('/api/telemetry/client-error', recordClientError);
 app.route('/api/task-service/v1', taskServiceApi);
 if (tenantProfile.capabilities.portalSupport) {

@@ -32,6 +32,16 @@ export type TenantProfileExtensions = {
       /** Preferred actor for imported tickets, when that user is active. */
       actorEmail?: string;
     };
+    /** Inbound design requests. Absent: the endpoint answers 503. */
+    portalDesign?: {
+      /** Allowed nonempty campus keys and their display labels. Empty campus is always allowed. */
+      campusLabels?: Readonly<Record<string, string>>;
+      projectKey: string;
+      assigneeEmail: string;
+      actorEmail: string;
+      /** A fixed lane, or the deployment's ENVIRONMENT binding for multi-lane builds. */
+      environment: 'dev' | 'production' | 'deployment';
+    };
     /** Event-intake assistant. Absent: no model endpoint is accepted. */
     eventAssist?: {
       /** Hostnames of the model endpoint EVENT_AI_ENDPOINT may point at. */
