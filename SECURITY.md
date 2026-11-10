@@ -12,19 +12,29 @@ reporting (GitHub Security Advisories), not through a public issue or pull reque
 ## Security model in brief
 
 - **Identity.** Google OAuth (authorization code with PKCE; the email must be verified and, when
-  configured, in `TASKS_HOSTED_DOMAIN`) issuing a signed 12-hour session cookie, or an email header
+  configured, in `TASKS_HOSTED_DOMAIN`) issuing a signed session cookie with a seven-day idle window
+  and a fixed 30-day limit from sign-in, or an email header
   from a reverse proxy you operate (`TASKS_AUTH_MODE=trusted-upstream`). The application stores no
   passwords.
 - **Authorization.** Permissions and project membership are read from the database on every
   request. The session cookie carries only an identity; claims in it are never used to authorize.
   Disabling a user takes effect on their next request. Impersonation ("view as") is re-authorized on
-  every request and can never grant more permission than the impersonator holds.
+  every request and can never grant more permission than the impersonator holds. It is never renewed,
+  lasts at most twelve hours, and cannot outlive the actor session. Stopping it revokes the
+  impersonated cookie and restores the actor’s original session deadlines.
 - **Admission fails closed.** An address unknown to the database is created at sign-in only when it
   is in `TASKS_HOSTED_DOMAIN` or is `TASKS_INITIAL_ADMIN_EMAIL`. The built-in `Agent` principal can
   never sign in as a person.
 - **Browser requests.** A write that carries browser credentials needs a same-origin `Origin`
   header and a double-submit CSRF token. Cross-origin (CORS) access is not granted. The session
   cookie is `HttpOnly`, `Secure` and `SameSite=Lax`.
+- **Session state.** Browser cookies require a matching, unexpired, non-revoked row in SQLite/D1.
+  Authorized browser activity renews at most hourly without moving the original 30-day cap. Logout
+  revokes the session before clearing the session and CSRF cookies; disabling a user permanently
+  revokes their existing sessions. A refresh cannot recreate a revoked row. Existing stateless
+  cookies require a fresh sign-in after migration `0022_browser_sessions.sql`. Google identity
+  verification is unchanged and no Google refresh token is stored. A versioned browser JWT audience
+  prevents older stateless binaries from accepting new cookies without enforcing their revocations.
 - **Agents.** `/mcp` and `/api/agent/v1` require a gateway secret and a per-client bearer token,
   compared in constant time. A credential is `read` or `read_write` and may expire; write requests
   carry idempotency keys and (for updates) an expected version.
@@ -38,8 +48,8 @@ reporting (GitHub Security Advisories), not through a public issue or pull reque
 
 - **No rate limiting** and no account lockout. Put limits on your reverse proxy.
 - **No full Content-Security-Policy and no HSTS.** Set both at the proxy, which knows your origin.
-- **No server-side session revocation.** Sign-out clears the cookie; a copied cookie remains valid
-  until it expires (12 hours) unless the user is disabled.
+- **No cancellation of requests already authorized.** Logout and account disabling reject subsequent
+  session checks; work authorized before revocation may finish.
 - **No encryption at rest.** The database file and uploaded assets are plain files; protect them
   with disk encryption and permissions.
 - **No multi-replica or high-availability mode.** SQLite is a single writer on one host.
@@ -56,6 +66,11 @@ reporting (GitHub Security Advisories), not through a public issue or pull reque
   `openssl rand -hex 32`) and the MCP gateway secret and client tokens; anyone who knows
   `SESSION_SECRET` can sign in as any user. The example environment files ship these empty on
   purpose. Keep secrets out of version control and out of the image.
+- **Migrate before serving new session code.** Apply `0022_browser_sessions.sql`; absent storage
+  fails closed. Use the same durable database for every instance and keep session reads strongly
+  consistent. After restoring an older backup, rotate `SESSION_SECRET` so restored revocation state
+  cannot make previously logged-out cookies usable again. See `docs/HOSTING.md` for session
+  lifetime, optional expiry cleanup and migration behavior.
 - **Set `TASKS_PUBLIC_ORIGIN`** behind a TLS-terminating proxy so the CSRF origin check and OAuth
   redirect URI use the public address.
 - `TASKS_INITIAL_ADMIN_EMAIL` grants every permission to that address at its first sign-in. Remove

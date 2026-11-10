@@ -53,6 +53,20 @@ export const taskAlertPreferencesPatchSchema = z
 
 export type TaskAlertPreferences = z.infer<typeof taskAlertPreferencesSchema>;
 
+export const emailFrequencySchema = z.enum(['immediate', 'hourly', 'daily', 'weekly', 'off']);
+export const emailDeliveryPreferencesSchema = z.object({
+  hardLimit: z.number().int().min(0).max(1000),
+  period: z.enum(['hour', 'day', 'week']),
+  assignments: emailFrequencySchema,
+  comments: emailFrequencySchema,
+  mentions: emailFrequencySchema,
+  deadlines: emailFrequencySchema,
+});
+export type { EmailDeliveryPreferences, EmailFrequency } from '../../shared/email-delivery';
+export const emailDeliverySettingsSchema = z.object({
+  perMinute: z.number().int().min(0).max(1000),
+});
+
 export const accountPreferencesSchema = z.object({
   taskCreationMode: taskCreationModeSchema,
   notificationEmails: z
@@ -64,6 +78,7 @@ export const accountPreferencesSchema = z.object({
     })
     .optional(),
   notificationAlerts: taskAlertPreferencesSchema.optional(),
+  emailDelivery: emailDeliveryPreferencesSchema.optional(),
 });
 
 export const taskMutationSchema = z.object({

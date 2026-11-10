@@ -1,3 +1,7 @@
+import type { EmailDeliveryPreferences } from '../../../shared/email-delivery';
+
+export type { EmailDeliveryPreferences } from '../../../shared/email-delivery';
+
 import type { RuntimeFeatures } from '../../../shared/runtime-features';
 import type {
   TaskEffort as PortableTaskEffort,
@@ -42,6 +46,7 @@ export type AccountPreferences = {
   taskCreationMode: TaskCreationMode;
   notificationEmails?: NotificationEmailPreferences;
   notificationAlerts?: TaskAlertPreferences;
+  emailDelivery?: EmailDeliveryPreferences;
 };
 
 export type Bootstrap = {

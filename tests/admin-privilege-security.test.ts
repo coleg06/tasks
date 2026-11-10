@@ -7,9 +7,11 @@ import {
   safeReturnTo,
   signSession,
   verifyOAuthState,
+  verifySession,
 } from '../src/auth/session';
 import type { Env } from '../src/env';
 import { SessionIdentityProvider } from '../src/identity/session';
+import { withBrowserSessionStore } from './support/browser-session-store';
 import { testOrigins } from './support/origins';
 import { matchingTenantConfigurationRow } from './tenant-configuration-fixture';
 
@@ -102,6 +104,7 @@ function environment() {
     GOOGLE_CLIENT_ID: 'client-id',
     GOOGLE_CLIENT_SECRET: 'client-secret',
   } as unknown as Env;
+  withBrowserSessionStore(env);
   return { env, writes };
 }
 
@@ -218,7 +221,11 @@ legacyOnly('impersonation is re-authorized on every request', () => {
   afterEach(restore);
 
   async function impersonationToken(env: Env) {
-    return signSession(env, ordinary, permissionsFor(ordinary.id), manager);
+    const actorSession = await verifySession(
+      env,
+      await signSession(env, manager, permissionsFor(manager.id)),
+    );
+    return signSession(env, ordinary, permissionsFor(ordinary.id), manager, actorSession);
   }
 
   it('accepts a valid impersonation and attributes it to the actor', async () => {
@@ -279,9 +286,17 @@ legacyOnly('stopping impersonation always succeeds', () => {
   };
   afterEach(restoreState);
 
+  async function impersonationTokenForStop(env: Env) {
+    const actorSession = await verifySession(
+      env,
+      await signSession(env, manager, permissionsFor(manager.id)),
+    );
+    return signSession(env, ordinary, permissionsFor(ordinary.id), manager, actorSession);
+  }
+
   async function stop() {
     const { env, writes } = environment();
-    const token = await signSession(env, ordinary, permissionsFor(ordinary.id), manager);
+    const token = await impersonationTokenForStop(env);
     const response = await app.request(
       `${ORIGIN}/api/admin/impersonation/stop`,
       {

@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { TenantProfile } from '../../../shared/tenant-profile';
 import { tenantProfile } from '../../../shared/tenant-profile';
-import { useBootstrap, useUpdateAccountPreferences } from '../api/queries';
-import type { TaskAlertPreferences, TaskCreationMode } from '../api/types';
+import { useBootstrap, useEmailPreferences, useUpdateAccountPreferences } from '../api/queries';
+import type {
+  EmailDeliveryPreferences,
+  TaskAlertPreferences,
+  TaskCreationMode,
+} from '../api/types';
 import { Modal } from '../ui/Modal';
 
 const choices: Array<{
@@ -21,6 +25,15 @@ const choices: Array<{
     description: 'Create from one line, with optional !priority, >date, and @assignee shortcuts.',
   },
 ];
+
+const defaultEmail: EmailDeliveryPreferences = {
+  hardLimit: 5,
+  period: 'day',
+  assignments: 'immediate',
+  comments: 'immediate',
+  mentions: 'immediate',
+  deadlines: 'immediate',
+};
 
 const defaultNotifications: TaskAlertPreferences = {
   assignments: { email: true, inApp: false, push: false },
@@ -89,6 +102,13 @@ export function TaskPreferencesDialog({
   showTaskCreation: boolean;
 }) {
   const bootstrap = useBootstrap();
+  const emailQuery = useEmailPreferences(open && tenantProfile.capabilities.emailNotifications);
+  const savedEmail = emailQuery.data?.preferences ?? defaultEmail;
+  const [email, setEmail] = useState<EmailDeliveryPreferences>(savedEmail);
+  const platformCap = emailQuery.data?.settings.perMinute ?? 5;
+  const emailUnavailable = tenantProfile.capabilities.emailNotifications && !emailQuery.data;
+  const emailInvalid =
+    !Number.isInteger(email.hardLimit) || email.hardLimit < 0 || email.hardLimit > 1000;
   const update = useUpdateAccountPreferences();
   const resetUpdate = update.reset;
   const savedMode = bootstrap.data?.user?.task_creation_mode ?? 'guided';
@@ -100,14 +120,17 @@ export function TaskPreferencesDialog({
   useEffect(() => {
     if (open) {
       setMode(savedMode);
+      setEmail(savedEmail);
       setNotifications(savedNotifications);
       resetUpdate();
     }
-  }, [open, savedMode, savedNotifications, resetUpdate]);
+  }, [open, savedMode, savedNotifications, savedEmail, resetUpdate]);
 
   const nothingToConfigure = !showTaskCreation && enabledChannels.length === 0;
   const dirty =
     (showTaskCreation && mode !== savedMode) ||
+    (tenantProfile.capabilities.emailNotifications &&
+      JSON.stringify(email) !== JSON.stringify(savedEmail)) ||
     JSON.stringify(
       notificationPreferencesForCapabilities(notifications, tenantProfile.capabilities),
     ) !==
@@ -119,6 +142,7 @@ export function TaskPreferencesDialog({
     update.mutate(
       {
         taskCreationMode: mode,
+        ...(tenantProfile.capabilities.emailNotifications ? { emailDelivery: email } : {}),
         notificationAlerts: notificationPreferencesForCapabilities(
           notifications,
           tenantProfile.capabilities,
@@ -148,7 +172,7 @@ export function TaskPreferencesDialog({
         className="preferences-form"
         onSubmit={(event) => {
           event.preventDefault();
-          if (dirty && !update.isPending) save();
+          if (dirty && !update.isPending && !emailUnavailable && !emailInvalid) save();
         }}
       >
         <div className="preferences-body">
@@ -175,6 +199,58 @@ export function TaskPreferencesDialog({
             </fieldset>
           ) : null}
 
+          {tenantProfile.capabilities.emailNotifications ? (
+            <section className="preferences-section" aria-labelledby="email-limits-heading">
+              <h3 id="email-limits-heading">Email limits</h3>
+              <p className="preferences-note">
+                Your default is five emails per rolling day. This deployment allows at most{' '}
+                {platformCap} emails per rolling minute across all recipients. Excess emails and
+                summaries are permanently suppressed.
+              </p>
+              {emailQuery.error ? (
+                <p className="form-error" role="alert">
+                  Unable to load email preferences. Reopen Preferences to retry.
+                </p>
+              ) : emailUnavailable ? (
+                <p>Loading email preferences…</p>
+              ) : null}
+              <label>
+                My maximum emails (zero disables email)
+                <input
+                  type="number"
+                  min={0}
+                  max={1000}
+                  required
+                  value={email.hardLimit}
+                  onChange={(event) =>
+                    setEmail((current) => ({ ...current, hardLimit: event.target.valueAsNumber }))
+                  }
+                />
+              </label>
+              <label>
+                Rolling limit period
+                <select
+                  value={email.period}
+                  onChange={(event) =>
+                    setEmail((current) => ({
+                      ...current,
+                      period: event.target.value as EmailDeliveryPreferences['period'],
+                    }))
+                  }
+                >
+                  <option value="hour">Hour</option>
+                  <option value="day">Day</option>
+                  <option value="week">Week</option>
+                </select>
+              </label>
+              <p className="preferences-note">
+                Hourly, daily, and weekly choices combine categories into one summary per selected
+                UTC interval, with up to 25 accessible items. Daily summaries run at midnight UTC;
+                weekly summaries run Monday at midnight UTC. Missed or blocked summaries are
+                discarded.
+              </p>
+            </section>
+          ) : null}
           {enabledChannels.length ? (
             <section aria-labelledby="preferences-alerts-heading" className="preferences-section">
               <h3 id="preferences-alerts-heading">Workflow alerts</h3>
@@ -205,25 +281,50 @@ export function TaskPreferencesDialog({
                       </th>
                       {enabledChannels.map((channel) => (
                         <td className="preferences-cell" key={channel.key}>
-                          <label className="preferences-toggle">
-                            <input
-                              aria-label={`${channel.shortLabel} for ${choice.label}`}
-                              checked={notifications[choice.key][channel.key]}
-                              onChange={(event) =>
+                          {channel.key === 'email' ? (
+                            <select
+                              aria-label={`Email frequency for ${choice.label}`}
+                              value={email[choice.key]}
+                              onChange={(event) => {
+                                const frequency = event.target
+                                  .value as EmailDeliveryPreferences['assignments'];
+                                setEmail((current) => ({ ...current, [choice.key]: frequency }));
                                 setNotifications((current) => ({
                                   ...current,
                                   [choice.key]: {
                                     ...current[choice.key],
-                                    [channel.key]: event.target.checked,
+                                    email: frequency !== 'off',
                                   },
-                                }))
-                              }
-                              type="checkbox"
-                            />
-                            <span aria-hidden="true" className="preferences-toggle-label">
-                              {channel.shortLabel}
-                            </span>
-                          </label>
+                                }));
+                              }}
+                            >
+                              <option value="immediate">Immediate</option>
+                              <option value="hourly">Hourly</option>
+                              <option value="daily">Daily</option>
+                              <option value="weekly">Weekly</option>
+                              <option value="off">Off</option>
+                            </select>
+                          ) : (
+                            <label className="preferences-toggle">
+                              <input
+                                aria-label={`${channel.shortLabel} for ${choice.label}`}
+                                checked={notifications[choice.key][channel.key]}
+                                onChange={(event) =>
+                                  setNotifications((current) => ({
+                                    ...current,
+                                    [choice.key]: {
+                                      ...current[choice.key],
+                                      [channel.key]: event.target.checked,
+                                    },
+                                  }))
+                                }
+                                type="checkbox"
+                              />
+                              <span aria-hidden="true" className="preferences-toggle-label">
+                                {channel.shortLabel}
+                              </span>
+                            </label>
+                          )}
                         </td>
                       ))}
                     </tr>
@@ -250,7 +351,16 @@ export function TaskPreferencesDialog({
             {nothingToConfigure ? 'Close' : 'Cancel'}
           </button>
           {nothingToConfigure ? null : (
-            <button className="button-primary" disabled={!dirty || update.isPending} type="submit">
+            <button
+              className="button-primary"
+              disabled={
+                !dirty ||
+                update.isPending ||
+                emailUnavailable ||
+                (tenantProfile.capabilities.emailNotifications && emailInvalid)
+              }
+              type="submit"
+            >
               {update.isPending ? 'Saving…' : 'Save changes'}
             </button>
           )}

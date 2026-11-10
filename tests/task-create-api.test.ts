@@ -3,6 +3,7 @@ import { tenantProfile } from '../shared/tenant-profile';
 import { app } from '../src/app';
 import { signSession } from '../src/auth/session';
 import type { Env } from '../src/env';
+import { withBrowserSessionStore } from './support/browser-session-store';
 import { testOrigins } from './support/origins';
 import {
   isTenantConfigurationQuery,
@@ -120,6 +121,7 @@ describe('task creation API reliability', () => {
       ENVIRONMENT: 'production',
       SESSION_SECRET: 'test-session-secret-that-is-long-enough',
     } as unknown as Env;
+    withBrowserSessionStore(env);
     const token = await signSession(env, { id: 6, email: 'owner2@example.org' }, [
       'tasks.view',
       'tasks.manage',

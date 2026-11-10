@@ -10,6 +10,7 @@ import {
   updateTaskAlertPreferences,
 } from './account/alerts';
 import { updateAccountPreferences } from './account/api';
+import { registerAccountEmailRoutes } from './account/email';
 import {
   getAdminOverview,
   impersonateAdminUser,
@@ -18,6 +19,7 @@ import {
   updateAdminUser,
 } from './admin/api';
 import { listAuditEvents } from './admin/audit';
+import { registerAdminEmailRoutes } from './admin/email-settings';
 import {
   bulkAdminUsers,
   bulkInviteAdminUsers,
@@ -27,6 +29,12 @@ import {
 } from './admin/people';
 import { createAdminRole, deleteAdminRole, listAdminRoles, updateAdminRole } from './admin/roles';
 import { getWorkflowAnalytics } from './analytics/api';
+import {
+  CSRF_COOKIE,
+  clearSessionCookies,
+  issueCsrfCookie,
+  setSessionCookie,
+} from './auth/cookies';
 import {
   authIsConfigured,
   base64Url,
@@ -40,6 +48,8 @@ import { effectivePermissionKeys } from './auth/permissions';
 import { admitGoogleSignIn } from './auth/provision';
 import {
   OAUTH_COOKIE,
+  renewSession,
+  revokeSessionToken,
   SESSION_COOKIE,
   safeReturnTo,
   signOAuthState,
@@ -118,20 +128,6 @@ import {
 import { recordClientError } from './telemetry/api';
 
 export const app = new Hono<TaskAppEnv>();
-
-const CSRF_COOKIE = `${tenantProfile.security.cookiePrefix}_csrf`;
-
-function issueCsrfCookie(context: Parameters<typeof setCookie>[0]) {
-  const token = base64Url(crypto.getRandomValues(new Uint8Array(32)));
-  setCookie(context, CSRF_COOKIE, token, {
-    httpOnly: false,
-    maxAge: 43_200,
-    path: '/',
-    sameSite: 'Strict',
-    secure: true,
-  });
-  return token;
-}
 
 function expectedBrowserOrigin(context: { env: Env; req: { url: string } }) {
   return publicOrigin(context.env, context.req.url);
@@ -259,6 +255,34 @@ app.use('/api/*', async (context, next) => {
     return context.json({ error: 'csrf_rejected' }, 403);
   }
   await next();
+});
+
+app.use('/api/*', async (context, next) => {
+  await next();
+  if (
+    tenantRuntimeAdapters.browserAuthentication === 'trusted-upstream' ||
+    usesEnvTrustedUpstream(context.env) ||
+    context.get('taskIdentity') ||
+    context.req.path.startsWith('/api/mobile/') ||
+    context.req.path.startsWith('/api/agent/') ||
+    context.res.status < 200 ||
+    context.res.status >= 300 ||
+    context.res.headers.getSetCookie().some((cookie) => cookie.startsWith(`${SESSION_COOKIE}=`))
+  ) {
+    return;
+  }
+  const token = getCookie(context, SESSION_COOKIE);
+  if (!token) return;
+  try {
+    const session = await verifySession(context.env, token);
+    const renewed = await renewSession(context.env, session);
+    if (renewed) {
+      setSessionCookie(context, renewed.token, renewed.expiresAt);
+      context.header('Cache-Control', 'no-store');
+    }
+  } catch {
+    // Fail closed for renewal; never erase a newer cookie after an unrelated in-flight response.
+  }
 });
 
 app.use('/api/analytics/workflows', requireRuntimeFeature('workflowAnalytics'));
@@ -514,14 +538,7 @@ app.get('/auth/callback', async (context) => {
     const user = await admitGoogleSignIn(context.env, identity);
     const permissionRows = await effectivePermissionKeys(context.env, user.id);
     const token = await signSession(context.env, user, permissionRows);
-    setCookie(context, SESSION_COOKIE, token, {
-      httpOnly: true,
-      maxAge: 43_200,
-      path: '/',
-      sameSite: 'Lax',
-      secure: true,
-    });
-    issueCsrfCookie(context);
+    setSessionCookie(context, token, (await verifySession(context.env, token)).exp);
     return context.redirect(oauth.returnTo);
   } catch (error) {
     await logApplicationError(
@@ -534,17 +551,22 @@ app.get('/auth/callback', async (context) => {
   }
 });
 
-app.post('/auth/logout', (context) => {
+app.post('/auth/logout', async (context) => {
   // Without this a page on another site could sign a user out by posting a form here.
   const origin = context.req.header('Origin');
   if (origin !== undefined && origin !== expectedBrowserOrigin(context)) {
     return context.json({ error: 'csrf_rejected' }, 403);
   }
-  deleteCookie(context, SESSION_COOKIE, { path: '/', secure: true });
+  const token = getCookie(context, SESSION_COOKIE);
+  if (token && !usesEnvTrustedUpstream(context.env)) {
+    await revokeSessionToken(context.env, token);
+  }
+  clearSessionCookies(context);
   return context.redirect('/');
 });
 
 app.get('/api/bootstrap', async (context) => {
+  context.header('Cache-Control', 'no-store');
   if (tenantRuntimeAdapters.browserAuthentication === 'trusted-upstream') {
     const identity = await resolveTasksIdentity(context, 'tasks.view');
     const email = identity?.principal.email?.trim().toLowerCase();
@@ -586,12 +608,13 @@ app.get('/api/bootstrap', async (context) => {
     const trusted = context.get('taskIdentity');
     const session =
       envTrusted && trusted ? trusted.session : await verifySession(context.env, token ?? '');
+    const permissionRows = await effectivePermissionKeys(context.env, Number(session.sub));
     if (
-      !session.perms.includes('tasks.view') &&
-      !session.perms.includes('tasks.personal') &&
+      !permissionRows.includes('tasks.view') &&
+      !permissionRows.includes('tasks.personal') &&
       !(
         resolveRuntimeFeatures(context.env.FEATURE_MODULES).events &&
-        session.perms.includes('events.view')
+        permissionRows.includes('events.view')
       )
     ) {
       return context.json({ error: 'forbidden' }, 403);
@@ -602,7 +625,9 @@ app.get('/api/bootstrap', async (context) => {
     )
       .bind(Number(session.sub))
       .first();
-    if (user?.status !== 'active') return context.json({ error: 'forbidden' }, 403);
+    if (user?.status !== 'active' || user.email !== session.email) {
+      return context.json({ error: 'forbidden' }, 403);
+    }
     if (!(await impersonationStillAuthorized(context.env, session, Number(session.sub)))) {
       throw new Error('impersonation_not_authorized');
     }
@@ -656,7 +681,6 @@ app.get('/api/bootstrap', async (context) => {
     } catch {
       // The notification migration can briefly lag a new Worker deployment.
     }
-    const permissionRows = await effectivePermissionKeys(context.env, Number(session.sub));
     const actor = session.act
       ? await context.env.DB.prepare(
           `SELECT id, email, first_name, last_name, photo_url
@@ -665,7 +689,11 @@ app.get('/api/bootstrap', async (context) => {
           .bind(Number(session.act.sub))
           .first()
       : null;
-    if (!getCookie(context, CSRF_COOKIE)) issueCsrfCookie(context);
+    if (envTrusted) {
+      if (!getCookie(context, CSRF_COOKIE)) issueCsrfCookie(context);
+    } else {
+      issueCsrfCookie(context, Math.max(0, session.exp - Math.floor(Date.now() / 1000)));
+    }
     const features: RuntimeFeatures = resolveRuntimeFeatures(context.env.FEATURE_MODULES);
     return context.json({
       authConfigured: true,
@@ -683,12 +711,14 @@ app.get('/api/bootstrap', async (context) => {
       impersonation: actor ? { actor } : null,
     });
   } catch {
-    deleteCookie(context, SESSION_COOKIE, { path: '/', secure: true });
+    clearSessionCookies(context);
     return context.json({ error: 'unauthorized' }, 401);
   }
 });
 
 if (tenantProfile.capabilities.portal) app.get('/api/my-work/summary', getMyWorkSummary);
+registerAccountEmailRoutes(app);
+registerAdminEmailRoutes(app);
 app.patch('/api/account/preferences', updateAccountPreferences);
 app.get('/api/task-alert-preferences', getTaskAlertPreferences);
 app.patch('/api/task-alert-preferences', updateTaskAlertPreferences);

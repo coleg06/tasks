@@ -1,13 +1,21 @@
 import type { Context } from 'hono';
-import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { getCookie } from 'hono/cookie';
 import { resolveRuntimeFeatures } from '../../shared/runtime-features';
 import { tenantProfile } from '../../shared/tenant-profile';
+import { clearSessionCookies, setSessionCookie } from '../auth/cookies';
 import {
   effectivePermissionKeys,
   PLATFORM_ADMIN_PERMISSION,
   userHasPermission,
 } from '../auth/permissions';
-import { SESSION_COOKIE, type SessionClaims, signSession, verifySession } from '../auth/session';
+import {
+  type BrowserSessionClaims,
+  restoreActorSession,
+  revokeSession,
+  SESSION_COOKIE,
+  signSession,
+  verifySession,
+} from '../auth/session';
 import type { Env } from '../env';
 import { logApplicationError } from '../logging';
 import { notificationsConfigured } from '../notifications/email';
@@ -758,21 +766,21 @@ export async function impersonateAdminUser(context: AppContext) {
     'user.impersonation_started',
     { targetUserId: target.id },
   ).run();
-  const token = await signSession(context.env, target, permissions, identity.user);
-  setCookie(context, SESSION_COOKIE, token, {
-    httpOnly: true,
-    maxAge: 43_200,
-    path: '/',
-    sameSite: 'Lax',
-    secure: true,
-  });
+  const token = await signSession(
+    context.env,
+    target,
+    permissions,
+    identity.user,
+    identity.session,
+  );
+  setSessionCookie(context, token, (await verifySession(context.env, token)).exp);
   return context.json({ ok: true });
 }
 
 export async function stopAdminImpersonation(context: AppContext) {
   const token = getCookie(context, SESSION_COOKIE);
   if (!token) return context.json({ error: 'unauthorized' }, 401);
-  let session: SessionClaims;
+  let session: BrowserSessionClaims;
   try {
     session = await verifySession(context.env, token);
   } catch {
@@ -811,16 +819,11 @@ export async function stopAdminImpersonation(context: AppContext) {
     );
   }
   if (!actor || !mayRestore) {
-    deleteCookie(context, SESSION_COOKIE, { path: '/', secure: true });
+    await revokeSession(context.env, session);
+    clearSessionCookies(context);
     return context.json({ ok: true, restored: false });
   }
-  const restored = await signSession(context.env, actor, permissionKeys);
-  setCookie(context, SESSION_COOKIE, restored, {
-    httpOnly: true,
-    maxAge: 43_200,
-    path: '/',
-    sameSite: 'Lax',
-    secure: true,
-  });
+  const restored = await restoreActorSession(context.env, session, actor, permissionKeys);
+  setSessionCookie(context, restored.token, restored.expiresAt);
   return context.json({ ok: true });
 }

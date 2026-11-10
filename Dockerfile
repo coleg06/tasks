@@ -10,7 +10,17 @@ RUN npm ci --ignore-scripts --no-audit --no-fund \
   && npm cache clean --force \
   && rm -rf node_modules
 
-FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS mcp-runtime
+FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS node-runtime
+
+# Both final images execute self-contained bundles with node only. Keep the
+# pinned base, but remove its unused installers and their transitive packages.
+# The build stage and Dockerfile.base still need npm to prepare tenant builds.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /opt/yarn-* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/pnpm /usr/local/bin/pnpx
+
+FROM node-runtime AS mcp-runtime
 
 ARG SOURCE_COMMIT
 LABEL org.opencontainers.image.title="Tasks MCP runtime" \
@@ -29,7 +39,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/live"]
 CMD ["node", "dist/mcp/standalone.js"]
 
-FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS runtime
+FROM node-runtime AS runtime
 
 ENV NODE_ENV=production \
     TASKS_SITE_HOST=0.0.0.0 \

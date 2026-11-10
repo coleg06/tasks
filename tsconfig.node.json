@@ -18,6 +18,7 @@
     "tests/self-hosted/sqlite-server.test.ts",
     "tests/platform/**/*.ts",
     "tests/support/**/*.ts",
+    "tests/fixtures/**/*.ts",
     "vite.config.ts",
     "vitest.config.ts"
   ],

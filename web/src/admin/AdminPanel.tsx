@@ -4,6 +4,7 @@ import type { RuntimeFeatures } from '../../../shared/runtime-features';
 import { tenantProfile } from '../../../shared/tenant-profile';
 import { useAdmin, useAdminRoles } from '../api/queries';
 import { AuditTab } from './AuditTab';
+import { EmailSettings } from './EmailSettings';
 import { PeopleTab } from './PeopleTab';
 import { RolesTab } from './RolesTab';
 import { dateTime } from './shared';
@@ -414,7 +415,14 @@ export function AdminPanel({
         ) : null}
         {tab === 'roles' ? <RolesTab /> : null}
         {tab === 'audit' ? <AuditTab /> : null}
-        {tab === 'overview' ? <OverviewTab /> : null}
+        {tab === 'overview' ? (
+          <>
+            <OverviewTab />
+            {currentIsPlatformAdmin && tenantProfile.capabilities.emailNotifications ? (
+              <EmailSettings />
+            ) : null}
+          </>
+        ) : null}
       </div>
     </div>
   );

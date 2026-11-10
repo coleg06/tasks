@@ -1,9 +1,11 @@
 import type { Env } from '../env';
+import { aggregateDigest, emailFrequencyFor, mapEmailBatch } from './delivery';
 import {
+  canReceiveNotification,
   eventUrl,
   myTasksUrl,
   type NotificationDetail,
-  sendUserNotification,
+  prepareScheduledEmail,
   taskUrl,
 } from './email';
 
@@ -25,6 +27,8 @@ function deadlineLabel(days: number) {
 export type DeadlineDigestItem = NotificationDetail & {
   userId: number;
   days: number;
+  entityType?: 'task' | 'event_work_item';
+  entityKey?: string;
 };
 
 export function groupDeadlineItems(items: DeadlineDigestItem[]) {
@@ -61,6 +65,11 @@ export async function sendDeadlineNotifications(env: Env, now = new Date()) {
   }
 
   const runDate = isoDate(now);
+  const dispatch = await env.DB.prepare(`INSERT OR IGNORE INTO email_dispatch_runs (dispatch_key)
+    VALUES (?) RETURNING started_at`)
+    .bind(`deadlines:${runDate}`)
+    .first<{ started_at: number }>();
+  if (!dispatch) return { attempted: 0, matchedItems: 0 };
   const today = new Date(`${runDate}T12:00:00Z`);
   const offsets = [0, 1, 3];
   const items: DeadlineDigestItem[] = [];
@@ -84,6 +93,8 @@ export async function sendDeadlineNotifications(env: Env, now = new Date()) {
     items.push(
       ...tasks.results.map((task) => ({
         userId: task.assignee_user_id,
+        entityType: 'task' as const,
+        entityKey: task.task_key,
         days,
         label: deadlineLabel(days),
         title: task.title,
@@ -110,6 +121,8 @@ export async function sendDeadlineNotifications(env: Env, now = new Date()) {
     items.push(
       ...workItems.results.map((item) => ({
         userId: item.owner_user_id,
+        entityType: 'event_work_item' as const,
+        entityKey: item.work_item_key,
         days,
         label: deadlineLabel(days),
         title: item.title,
@@ -119,29 +132,65 @@ export async function sendDeadlineNotifications(env: Env, now = new Date()) {
     );
   }
 
-  const digests = groupDeadlineItems(items);
-  let attempted = 0;
-  for (const [userId, userItems] of digests) {
-    attempted += 1;
+  const authorized: DeadlineDigestItem[] = [];
+  for (const item of items) {
+    if (
+      item.entityType &&
+      item.entityKey &&
+      (await canReceiveNotification(env, item.userId, item.entityType, item.entityKey))
+    )
+      authorized.push(item);
+  }
+  const digests = groupDeadlineItems(authorized);
+  const sends = await mapEmailBatch([...digests].slice(0, 50), async ([userId, userItems]) => {
+    const frequency = await emailFrequencyFor(env, userId, 'deadline');
+    if (frequency === 'off') return undefined;
+    if (frequency !== 'immediate') {
+      for (const item of userItems.slice(0, 25)) {
+        if (!item.entityType || !item.entityKey) continue;
+        await aggregateDigest(
+          env,
+          {
+            userId,
+            kind: 'deadline',
+            entityType: item.entityType,
+            entityKey: item.entityKey,
+            dedupeKey: `deadline:${userId}:${runDate}:${item.entityKey}`,
+            subject: '',
+            heading: '',
+            message: '',
+            url: item.url,
+          },
+          frequency,
+        );
+      }
+      return undefined;
+    }
     const visibleItems = userItems.slice(0, 25);
     const omitted = userItems.length - visibleItems.length;
     const summary = digestSummary(userItems);
     const message = omitted
       ? `${summary}. The first 25 items are shown below; ${omitted} more are waiting in My Tasks.`
       : `${summary}.`;
-    await sendUserNotification(env, {
-      userId,
-      kind: 'deadline',
-      entityType: 'deadline_digest',
-      entityKey: runDate,
-      dedupeKey: `deadline-digest:${userId}:${runDate}`,
-      subject: `Tasks deadline digest: ${userItems.length} upcoming ${userItems.length === 1 ? 'item' : 'items'}`,
-      heading: 'Your upcoming Tasks deadlines',
-      message,
-      details: visibleItems,
-      url: myTasksUrl(env),
-    });
-  }
-
-  return { attempted, matchedItems: items.length };
+    return prepareScheduledEmail(
+      env,
+      {
+        userId,
+        kind: 'deadline',
+        entityType: 'deadline_digest',
+        entityKey: runDate,
+        dedupeKey: `deadline-digest:${userId}:${runDate}`,
+        subject: `Tasks deadline digest: ${userItems.length} upcoming ${userItems.length === 1 ? 'item' : 'items'}`,
+        heading: 'Your upcoming Tasks deadlines',
+        message,
+        details: visibleItems,
+        url: myTasksUrl(env),
+      },
+      'daily',
+      dispatch.started_at,
+    );
+  });
+  const admitted = sends.filter((send) => send !== undefined);
+  await mapEmailBatch(admitted, (send) => send());
+  return { attempted: admitted.length, matchedItems: items.length };
 }

@@ -186,6 +186,8 @@ describe.runIf(tenantProfile.tasks.apiMode === 'legacy')('deployment tenant isol
     const queries: string[] = [];
     const env = environment(() => foreign, queries);
     const headers = await browserHeaders(env);
+    // Session issuance is fixture setup, before the tenant gate is exercised.
+    queries.length = 0;
     const before = foreign.prepare('SELECT total_changes() AS count').get();
     const requests: Array<[string, string]> = [
       ['GET', '/api/tasks'],
@@ -380,6 +382,7 @@ describe.runIf(tenantProfile.tasks.apiMode === 'legacy')('deployment tenant isol
     await Promise.all(scheduler.tick(daily + 86_400_000));
     expect(failures.sort()).toEqual([
       'deadline_notifications:tenant_configuration_mismatch',
+      'email_digests:tenant_configuration_mismatch',
       'operational_log_retention:tenant_configuration_mismatch',
       'portal_alert_retry:tenant_configuration_mismatch',
     ]);

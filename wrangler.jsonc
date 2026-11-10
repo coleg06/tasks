@@ -26,6 +26,7 @@
       "bucket_name": "tasks-assets-local"
     }
   ],
+  "triggers": { "crons": ["* * * * *", "0 13 * * *", "*/5 * * * *"] },
   "observability": { "enabled": true },
   "vars": {
     "ENVIRONMENT": "local",

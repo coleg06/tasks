@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { tenantProfile } from '../../shared/tenant-profile';
+import { sessionSecretIsConfigured } from '../auth/session';
 import type { Env } from '../env';
 import { authModeProblems, configuredAuthMode } from '../identity/auth-mode';
 import { tenantRuntimeAdapters } from '../runtime/tenant-adapters';
@@ -147,7 +148,7 @@ export async function openSelfHostedPlatform(config: PlatformConfig): Promise<Se
  * different identity provider means a different tenant adapter (and a different list). Only
  * variable names are ever reported, never values.
  */
-export const MINIMUM_SESSION_SECRET_LENGTH = 32;
+export { MINIMUM_SESSION_SECRET_LENGTH } from '../auth/session';
 
 export const SESSION_IDENTITY_VARIABLES = [
   'SESSION_SECRET',
@@ -176,6 +177,6 @@ export function missingIdentityVariables(source: NodeJS.ProcessEnv | Env): strin
     const value = values[name];
     if (typeof value !== 'string' || value.trim() === '') return true;
     // A short signing key can be guessed, and anyone holding it can forge any user's session.
-    return name === 'SESSION_SECRET' && value.trim().length < MINIMUM_SESSION_SECRET_LENGTH;
+    return name === 'SESSION_SECRET' && !sessionSecretIsConfigured(value);
   });
 }

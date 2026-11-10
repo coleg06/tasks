@@ -10,7 +10,7 @@ import { app } from '../../src/app';
 import { impersonationStillAuthorized } from '../../src/auth/impersonation';
 import { effectivePermissionKeys, userHasPermission } from '../../src/auth/permissions';
 import { provisionSignedInUser } from '../../src/auth/provision';
-import { signSession } from '../../src/auth/session';
+import { signSession, verifySession } from '../../src/auth/session';
 import type { Env } from '../../src/env';
 import type { SqlDatabase } from '../../src/platform/ports';
 
@@ -169,7 +169,11 @@ export function describeRbacScenario(label: string, open: () => Promise<RbacBack
         .filter((id) => !keep.includes(id));
       for (const id of others) await run("UPDATE users SET status = 'disabled' WHERE id = ?", id);
       return async () => {
-        for (const id of others) await run("UPDATE users SET status = 'active' WHERE id = ?", id);
+        for (const id of others) {
+          await run("UPDATE users SET status = 'active' WHERE id = ?", id);
+          // Re-enabling no longer revives old sessions: the next fixture request signs in afresh.
+          cookies.delete(id);
+        }
       };
     }
 
@@ -1179,6 +1183,8 @@ export function describeRbacScenario(label: string, open: () => Promise<RbacBack
             (await first<{ status: string }>('SELECT status FROM users WHERE id = ?', id))?.status,
           ).toBe('active');
         }
+        // Issue cookies while active, then prove disabling revokes those existing sessions.
+        await Promise.all(users.map(cookieFor));
         const disabled = await request(manager, 'POST', '/api/admin/users/bulk', {
           action: 'disable',
           userIds: ids,
@@ -1714,7 +1720,13 @@ export function describeRbacScenario(label: string, open: () => Promise<RbacBack
       describe('granted_by under impersonation', () => {
         it('records the real administrator, not the impersonated person', async () => {
           const manager = await newManager();
-          const token = await signSession(env, manager, [], root);
+          const token = await signSession(
+            env,
+            manager,
+            [],
+            root,
+            await verifySession(env, await signSession(env, root, [])),
+          );
           const prefix = tenantProfile.security.cookiePrefix;
           const asRoot = async (method: string, path: string, body?: unknown) => {
             const response = await app.request(
@@ -1770,7 +1782,13 @@ export function describeRbacScenario(label: string, open: () => Promise<RbacBack
         it('records the real administrator for role-deletion reassignments', async () => {
           // Only an administrator can delete roles, so the impersonated person is one too.
           const other = await newAdmin();
-          const token = await signSession(env, other, [], root);
+          const token = await signSession(
+            env,
+            other,
+            [],
+            root,
+            await verifySession(env, await signSession(env, root, [])),
+          );
           const prefix = tenantProfile.security.cookiePrefix;
           const replaced = await customRole('Replaceable', ['tasks.view']);
           const replacement = await customRole('Replacement', ['tasks.view']);

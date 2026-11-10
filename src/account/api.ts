@@ -1,4 +1,6 @@
 import type { Context } from 'hono';
+import { tenantProfile } from '../../shared/tenant-profile';
+import { emailDeliveryPreferenceStatements } from '../notifications/delivery';
 import { accountPreferencesSchema } from '../shared/schemas';
 import { auditStatement, requireTasksSession, type TaskAppEnv } from '../tasks/api';
 import { taskAlertPreferencesStatement } from './alerts';
@@ -16,6 +18,10 @@ export async function updateAccountPreferences(context: AppContext) {
   }
 
   const preferences = parsed.data;
+  if (preferences.emailDelivery) {
+    if (!tenantProfile.capabilities.emailNotifications)
+      return context.json({ error: 'email_disabled' }, 403);
+  }
   const statements = [
     context.env.DB.prepare(
       `INSERT INTO user_preferences (user_id, task_creation_mode, updated_at)
@@ -59,6 +65,14 @@ export async function updateAccountPreferences(context: AppContext) {
       taskAlertPreferencesStatement(context.env, identity.user.id, preferences.notificationAlerts),
     );
   }
+  if (preferences.emailDelivery)
+    statements.push(
+      ...emailDeliveryPreferenceStatements(
+        context.env,
+        identity.user.id,
+        preferences.emailDelivery,
+      ),
+    );
   await context.env.DB.batch(statements);
 
   return context.json({ preferences });

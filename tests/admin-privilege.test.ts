@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { tenantProfile } from '../shared/tenant-profile';
+import { withBrowserSessionStore } from './support/browser-session-store';
 import { testOrigins } from './support/origins';
 
 const legacyApi = tenantProfile.tasks.apiMode === 'legacy';
@@ -99,6 +100,7 @@ function fakeEnv(users: FakeUser[]) {
     ENVIRONMENT: 'dev',
     SESSION_SECRET: 'admin-privilege-test-secret-value',
   } as unknown as Env;
+  withBrowserSessionStore(env);
   return { env, writes, updateBinds };
 }
 

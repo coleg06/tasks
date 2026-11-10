@@ -51,9 +51,9 @@ time of writing).
 - Migrations: `wrangler d1 migrations apply <database>` from the repository root, or
   `CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... node scripts/apply-d1-migrations.mjs <database>`.
   Apply them before or immediately after deploying a release that adds one.
-- Static assets are served by Cloudflare without running the Worker, so the response headers the
-  application adds to its own routes (`nosniff`, framing, referrer policy) do not cover them. Add a
-  `_headers` file to the web build or set `run_worker_first` to `["/*"]` if you need them there.
+- Static assets are served by Cloudflare without running the Worker. The build copies
+  `web/public/_headers` into `web/dist` so these responses receive the same `nosniff`, framing,
+  base-URI and referrer protections as application routes. Preserve this file when publishing assets.
 - The Worker deployment is exercised by the contract tests under workerd; it is not covered by the
   self-hosted smoke test.
 
@@ -127,9 +127,56 @@ environment templates). For a throwaway local trial with no identity provider, `
 starts the built server in trusted-upstream mode behind a loopback-only proxy that signs you in as an
 administrator; it is not for any shared or networked machine.
 
-Generate `SESSION_SECRET` yourself (`openssl rand -hex 32`; production startup requires at least 32 characters); the example files ship it empty so that a
-production start fails until you do. Any non-empty value is accepted, so a short or published secret
-lets anyone sign in as any user.
+Generate `SESSION_SECRET` yourself (`openssl rand -hex 32`; all runtimes require at least 32 characters after trimming padding to sign or verify sessions and OAuth state); the example files ship it empty so that a
+production start fails until you do. Use a random, private value; a published secret lets anyone
+forge session signatures.
+
+### Browser session lifetime and logout
+
+Google sign-in creates a signed browser session backed by `browser_sessions` in the configured
+SQLite or D1 database. Its idle window is seven days. Successful authorized browser API activity
+renews the window at most once an hour, up to a fixed **30 days from the original sign-in**.
+The original authentication time is retained through every renewal. This hourly renewal interval
+means the remaining idle window can be up to one hour shorter than seven days. At the absolute
+limit, or after the idle window expires, the person must sign in with Google again. Google identity
+verification is unchanged; the app does not request or store Google refresh tokens.
+
+The browser cookie is first-party, `HttpOnly`, `Secure`, `SameSite=Lax`, scoped to `/`, and has
+`Max-Age` and `Expires` matching the signed JWT deadline. The readable double-submit CSRF cookie
+is `Secure`, `SameSite=Strict`, and renewed to the same remaining lifetime. Its value is retained
+across renewals so concurrent requests and other tabs keep working. Serve the app over HTTPS;
+browser privacy settings, private browsing and explicit cookie deletion can still require earlier
+sign-in. Session renewal does not rely on third-party cookies or browser local storage.
+
+Every browser request checks durable session expiry/revocation, the current active user and current
+permissions. Sign-out revokes the session server-side before clearing both cookies. Copied cookies
+and late refresh responses remain revoked across processes and Worker instances. Disabling a user
+permanently revokes their existing sessions, including sessions acting on their behalf; re-enabling
+an account requires a new sign-in. A request already authorized before logout/disable may finish.
+Impersonation is re-authorized on every request, never renewed, and expires within twelve hours and
+no later than the actor's session. Stopping impersonation revokes the impersonated cookie and restores
+the actor's existing session with its original idle deadline, authentication time and absolute cap.
+Signing out while impersonating revokes that actor session and its impersonation family. A signed
+expired cookie may revoke its own family at logout; it can never renew, authenticate or restore an
+actor. Storage failures prevent logout from reporting success.
+
+Apply additive migration `0022_browser_sessions.sql` before serving this code. No existing migration
+or user record is rewritten. Existing twelve-hour stateless cookies require one fresh sign-in;
+there is no automatic conversion of legacy cookies into longer sessions. Durable browser JWTs use
+a versioned audience, so older stateless binaries reject them instead of bypassing revocation after
+a rollback. Rolling back also requires a fresh sign-in. Missing session storage
+fails closed, so a code-before-migration rollout temporarily prevents browser sign-in/access.
+Trusted-upstream and portable tenant authentication keep their existing behavior and do not use
+browser session renewal. There are no new environment variables or secrets.
+
+Session state must be shared by every process/Worker serving the same installation. Do not route
+session checks to eventually consistent read replicas. Keep the database in backups; restoring an
+older database backup can restore older revocation state, so rotate `SESSION_SECRET` after such a
+restore to invalidate previously issued cookies. Rotation also forces all current browsers to sign
+in again. Expired rows may be pruned with
+`DELETE FROM browser_sessions WHERE absolute_expires_at <= unixepoch()`; this is optional operator
+maintenance, not a scheduled job. Active rows and their revocation tombstones must not be recreated
+from cookies. The application never does so.
 
 ### MCP server
 
@@ -308,8 +355,8 @@ the same assertions on workerd D1 and on `node:sqlite`:
   Uploads are limited to PNG, JPEG, WebP and PDF up to 50 MB, and every `/api` request body to 1 MiB
   (50 MiB plus form overhead for an upload), checked before the body is parsed.
 - **No rate limiting.** Apply request limits at your reverse proxy or in front of the Worker.
-- Sessions are stateless signed cookies (12 hours); disabling a user ends their access at once, but
-  signing out only clears the cookie.
+- Browser sessions require durable SQLite/D1 state and database availability; see
+  [Browser session lifetime and logout](#browser-session-lifetime-and-logout).
 - **Sign-in is Google or a trusted proxy.** See [Sign-in](#sign-in). This mode adds no passwords and
   no other identity provider; a different provider means supplying a tenant adapter
   (`src/runtime/tenant-adapters.ts`).

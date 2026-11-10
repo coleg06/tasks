@@ -1652,17 +1652,29 @@ input[type="date"]::-webkit-datetime-edit {
 .preferences-dialog {
   display: flex;
   width: min(580px, calc(100vw - 24px));
-  max-height: min(720px, calc(100dvh - 24px));
+  /* A definite height lets the nested form shrink and scroll in every engine.
+     Keep a vh fallback for embedded browsers without dynamic viewport units. */
+  height: min(640px, calc(100vh - 32px));
+  max-height: calc(100% - 32px);
+  overflow: hidden;
   flex-direction: column;
   padding: 0;
 }
 
+@supports (height: 100dvh) {
+  .preferences-dialog {
+    height: min(640px, calc(100dvh - 32px));
+  }
+}
+
 .preferences-dialog > .modal-heading {
+  flex: none;
   margin-bottom: var(--space-1);
   padding: var(--space-4) var(--space-4) 0;
 }
 
 .preferences-dialog > .modal-description {
+  flex: none;
   margin-bottom: 0;
   padding: 0 var(--space-4) var(--space-3);
 }
@@ -6327,4 +6339,29 @@ tr:first-child > .preferences-cell {
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+/* Email policy controls stay inside the preferences body's existing scroll area. */
+.preferences-section > label {
+  display: grid;
+  margin-top: var(--space-3);
+  gap: var(--space-1);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.preferences-section > label input,
+.preferences-section > label select,
+.preferences-cell > select {
+  min-height: 36px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.preferences-cell > select {
+  min-width: 100px;
 }

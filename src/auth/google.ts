@@ -1,11 +1,16 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Env } from '../env';
 import { configuredHostedDomain, isHostedEmail } from '../runtime/identity-config';
+import { sessionSecretIsConfigured } from './session';
 
 const googleKeys = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 
 export function authIsConfigured(env: Env) {
-  return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.SESSION_SECRET);
+  return Boolean(
+    env.GOOGLE_CLIENT_ID &&
+      env.GOOGLE_CLIENT_SECRET &&
+      sessionSecretIsConfigured(env.SESSION_SECRET),
+  );
 }
 
 export function base64Url(bytes: Uint8Array) {

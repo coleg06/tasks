@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { tenantProfile } from '../shared/tenant-profile';
 import type { TaskIdentity } from '../src/app-env';
-import { signSession } from '../src/auth/session';
+import { signSession, verifySession } from '../src/auth/session';
 import type { Env } from '../src/env';
 import { requireTasksSession } from '../src/identity/context';
 import { SessionIdentityProvider } from '../src/identity/session';
 import { requireTasksSession as compatibilityRequireTasksSession } from '../src/tasks/api';
+import { withBrowserSessionStore } from './support/browser-session-store';
 
 type User = { id: number; email: string; status: string };
 
@@ -57,10 +58,10 @@ function identityEnv(input: {
     };
     return statement;
   };
-  return {
+  return withBrowserSessionStore({
     DB: { prepare },
     SESSION_SECRET: 'session-identity-characterization-secret',
-  } as unknown as Env;
+  } as unknown as Env);
 }
 
 describe('Session identity provider', () => {
@@ -107,7 +108,8 @@ describe('Session identity provider', () => {
         directPermissions: ['tasks.view', 'tasks.manage'],
       },
     });
-    const token = await signSession(env, user, ['stale.permission'], actor);
+    const actorSession = await verifySession(env, await signSession(env, actor, ['tasks.manage']));
+    const token = await signSession(env, user, ['stale.permission'], actor, actorSession);
 
     const resolved = await new SessionIdentityProvider(env).resolve({
       kind: 'browser',

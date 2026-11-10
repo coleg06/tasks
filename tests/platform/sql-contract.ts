@@ -321,25 +321,32 @@ export function describeSqlContract(label: string, open: () => Promise<SqlBacken
       const triggers = await db
         .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger'")
         .all<{ sql: string }>();
-      const fires = (table: string, operation: string) =>
-        triggers.results.some((row) =>
-          new RegExp(
-            `\\b(?:AFTER|BEFORE)\\s+${operation}(?:\\s+OF\\s+\\w+)?\\s+ON\\s+${table}\\b`,
+      const fires = (table: string, operation: string, column?: string) =>
+        triggers.results.some((row) => {
+          const match = new RegExp(
+            `\\b(?:AFTER|BEFORE)\\s+${operation}(?:\\s+OF\\s+([\\w\\s,]+?))?\\s+ON\\s+${table}\\b`,
             'i',
-          ).test(row.sql),
-        );
-      for (const [table, operation] of [
+          ).exec(row.sql);
+          return (
+            match !== null && (!column || !match[1] || match[1].split(/[,\s]+/).includes(column))
+          );
+        });
+      for (const [table, operation, column] of [
         ['notification_outbox', 'INSERT'],
         ['notification_outbox', 'UPDATE'],
         ['notification_deliveries', 'INSERT'],
         ['mobile_idempotency_keys', 'INSERT'],
         ['mobile_gateway_requests', 'INSERT'],
-        ['users', 'UPDATE'],
+        // Session revocation runs on status changes, not mobile identity linking.
+        ['users', 'UPDATE', 'portal_db_id'],
         ['audit_events', 'INSERT'],
         ['task_comments', 'INSERT'],
         ['task_events', 'INSERT'],
       ] as const) {
-        expect(fires(table, operation), `${operation} ${table} must not fire triggers`).toBe(false);
+        expect(
+          fires(table, operation, column),
+          `${operation} ${table} must not fire triggers`,
+        ).toBe(false);
       }
       // ...and the tables the fixed callers write to do fire them (so they must use `> 0`).
       expect(fires('tasks', 'INSERT')).toBe(true);

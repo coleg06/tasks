@@ -19,6 +19,7 @@ import type {
   DeliverableStatus,
   DirectoryFilters,
   DirectoryPage,
+  EmailDeliveryPreferences,
   EventAssistDraft,
   EventAssistMessage,
   EventAssistResponse,
@@ -79,7 +80,12 @@ const messages: Record<string, string> = {
   invalid_project: 'That project is unavailable.',
   invalid_project_settings: 'Review the project settings and try again.',
   invalid_task: 'Some of those values were rejected.',
-  invalid_account_preferences: 'Choose one of the available task creation options.',
+  invalid_account_preferences: 'Review your task and notification preferences.',
+  invalid_email_preferences: 'Review your email limits and delivery choices.',
+  invalid_email_settings: 'Choose an email limit from zero through 1,000.',
+  personal_limit_exceeds_platform:
+    'The platform email limit changed. Reopen Preferences and choose a lower personal limit.',
+  email_disabled: 'Email notifications are disabled for this service.',
   hosted_email_required: tenantProfile.identity.hostedDomain
     ? `Use a valid @${tenantProfile.identity.hostedDomain} email address.`
     : 'Use a valid email address.',
@@ -487,6 +493,16 @@ export const api = {
       body: JSON.stringify(input),
     }).catch(() => undefined),
 
+  emailPreferences: () =>
+    request<{ preferences: EmailDeliveryPreferences; settings: { perMinute: number } }>(
+      '/api/account/email-preferences',
+    ),
+  emailSettings: () => request<{ settings: { perMinute: number } }>('/api/admin/email-settings'),
+  updateEmailSettings: (perMinute: number) =>
+    request<{ settings: { perMinute: number } }>('/api/admin/email-settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ perMinute }),
+    }),
   updateAccountPreferences: (preferences: AccountPreferences) =>
     request<{ preferences: AccountPreferences }>('/api/account/preferences', {
       method: 'PATCH',

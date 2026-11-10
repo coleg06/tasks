@@ -62,6 +62,18 @@ describe('task preferences dialog', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url.startsWith('/api/account/email-preferences'))
+          return Response.json({
+            preferences: {
+              hardLimit: 5,
+              period: 'day',
+              assignments: 'immediate',
+              comments: 'immediate',
+              mentions: 'immediate',
+              deadlines: 'immediate',
+            },
+            settings: { perMinute: 5 },
+          });
         if (url.startsWith('/api/account/preferences')) {
           const body = JSON.parse(String(init?.body));
           patches.push(body);
@@ -108,6 +120,7 @@ describe('task preferences dialog', () => {
     expect(patches).toHaveLength(1);
     expect(patches[0]).toMatchObject({ taskCreationMode: 'quick' });
     expect(Object.keys(patches[0] as object).sort()).toEqual([
+      ...(tenantProfile.capabilities.emailNotifications ? ['emailDelivery'] : []),
       'notificationAlerts',
       'taskCreationMode',
     ]);
@@ -144,23 +157,41 @@ describe('task preferences dialog', () => {
   });
 
   it.runIf(channels.length > 0)(
-    'lays alerts out as one labelled checkbox per alert and enabled channel',
+    'provides email frequency choices and labelled toggles for other channels',
     async () => {
       await mount();
       const boxes = document.body.querySelectorAll<HTMLInputElement>(
         '.preferences-matrix input[type="checkbox"]',
       );
-      expect(boxes).toHaveLength(4 * channels.length);
-      const first = channels[0];
-      expect(
-        q<HTMLInputElement>(`input[aria-label="${first?.shortLabel} for Assignments"]`),
-      ).not.toBeNull();
-
-      const comments = q<HTMLInputElement>(`input[aria-label="${first?.shortLabel} for Comments"]`);
-      await act(async () => comments?.click());
-      expect(saveButton()?.disabled).toBe(false);
-      await act(async () => comments?.click());
-      expect(saveButton()?.disabled).toBe(true);
+      expect(boxes).toHaveLength(4 * channels.filter((c) => c.key !== 'email').length);
+      if (tenantProfile.capabilities.emailNotifications) {
+        const email = q<HTMLSelectElement>('select[aria-label="Email frequency for Assignments"]');
+        expect([...(email?.options ?? [])].map((option) => option.value)).toEqual([
+          'immediate',
+          'hourly',
+          'daily',
+          'weekly',
+          'off',
+        ]);
+        await act(async () => {
+          if (email) {
+            email.value = 'weekly';
+            email.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        });
+        expect(saveButton()?.disabled).toBe(false);
+        await act(async () => q<HTMLFormElement>('form.preferences-form')?.requestSubmit());
+        await settle();
+        expect(patches[0]).toMatchObject({
+          emailDelivery: { assignments: 'weekly', hardLimit: 5, period: 'day' },
+        });
+      } else {
+        const first = boxes[0];
+        await act(async () => first?.click());
+        expect(saveButton()?.disabled).toBe(false);
+        await act(async () => first?.click());
+        expect(saveButton()?.disabled).toBe(true);
+      }
     },
   );
 

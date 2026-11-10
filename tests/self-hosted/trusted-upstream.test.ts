@@ -190,6 +190,15 @@ describe.runIf(
       'x-forwarded-user': 'Ada Admin',
     });
     expect(first.status).toBe(200);
+    const csrf = first.headers
+      .getSetCookie()
+      .find((cookie) => cookie.startsWith(`${tenantProfile.security.cookiePrefix}_csrf=`));
+    expect(csrf).toContain('Max-Age=43200');
+    expect(
+      first.headers
+        .getSetCookie()
+        .some((cookie) => cookie.startsWith(`${tenantProfile.security.cookiePrefix}_session=`)),
+    ).toBe(false);
     const body = (await first.json()) as {
       permissions: string[];
       release: string;

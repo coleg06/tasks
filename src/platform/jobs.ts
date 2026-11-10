@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import { logApplicationError, pruneOperationalEvents } from '../logging';
 import { sendDeadlineNotifications } from '../notifications/deadlines';
+import { sendEmailDigests } from '../notifications/digests';
 import { retryTaskAlertOutbox } from '../notifications/portal';
 import { tenantRuntimeAdapters } from '../runtime/tenant-adapters';
 import type { ScheduledJob, ScheduledJobs } from './ports';
@@ -10,6 +11,7 @@ import type { ScheduledJob, ScheduledJobs } from './ports';
  * scheduler (src/platform/scheduler.ts) both run exactly these entries.
  */
 export const scheduledJobTable: readonly ScheduledJob<Env>[] = [
+  { name: 'email_digests', cron: '* * * * *', run: (env) => sendEmailDigests(env) },
   {
     name: 'deadline_notifications',
     cron: '0 13 * * *',

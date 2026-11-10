@@ -2,6 +2,14 @@ import { tenantProfile, tenantTitle } from '../../shared/tenant-profile';
 import { tenantExtensions } from '../../shared/tenant-profile-support';
 import type { Env } from '../env';
 import { outboundLinkOrigin } from '../runtime/identity-config';
+import {
+  aggregateDigest,
+  claimEmailSend,
+  type DigestFrequency,
+  emailFrequencyFor,
+  emailSendLeaseMs,
+  reserveEmailQuota,
+} from './delivery';
 import { deliverTaskAlertOutboxEvent, taskAlertPublisherConfigured } from './portal';
 
 export type NotificationKind = 'assignment' | 'comment' | 'mention' | 'deadline';
@@ -110,7 +118,12 @@ export function notificationPayload(input: {
   details?: NotificationDetail[];
 }) {
   const recipient = input.recipientName || input.to;
-  const details = input.details ?? [];
+  const details = (input.details ?? []).slice(0, 25).map((detail) => ({
+    ...detail,
+    title: detail.title.slice(0, 240),
+    context: detail.context.slice(0, 240),
+    label: detail.label.slice(0, 80),
+  }));
   const detailText = details.length
     ? `\n\n${details
         .map((detail) => `${detail.label}: ${detail.title} — ${detail.context}\n${detail.url}`)
@@ -156,8 +169,8 @@ export function notificationsConfigured(env: Env) {
   }
 }
 
-async function canReceiveTaskNotification(env: Env, userId: number, taskKey: string) {
-  const access = await env.DB.prepare(
+export function taskNotificationAccessStatement(env: Env, userId: number, taskKey: string) {
+  return env.DB.prepare(
     `SELECT 1 AS allowed
      FROM tasks t
      JOIN projects p ON p.id = t.project_id
@@ -187,9 +200,44 @@ async function canReceiveTaskNotification(env: Env, userId: number, taskKey: str
            )
          ))
        )`,
-  )
-    .bind(userId, taskKey)
-    .first<{ allowed: number }>();
+  ).bind(userId, taskKey);
+}
+
+export async function canReceiveTaskNotification(env: Env, userId: number, taskKey: string) {
+  const access = await taskNotificationAccessStatement(env, userId, taskKey).first<{
+    allowed: number;
+  }>();
+  return Boolean(access?.allowed);
+}
+
+export function notificationAccessStatement(
+  env: Env,
+  userId: number,
+  entityType: NotificationEntity,
+  entityKey: string,
+) {
+  if (entityType === 'task') return taskNotificationAccessStatement(env, userId, entityKey);
+  if (entityType === 'deadline_digest') return env.DB.prepare('SELECT 0 AS allowed');
+  return env.DB.prepare(`SELECT 1 AS allowed FROM events e
+    JOIN workspace_members wm ON wm.workspace_id = e.workspace_id AND wm.user_id = ?
+    WHERE e.archived_at IS NULL AND ${
+      entityType === 'event_work_item'
+        ? 'EXISTS (SELECT 1 FROM event_work_items wi WHERE wi.event_id = e.id AND wi.work_item_key = ?)'
+        : 'e.event_key = ?'
+    }
+    AND EXISTS (SELECT 1 FROM effective_user_permissions up WHERE up.user_id = wm.user_id
+      AND up.permission_key IN ('events.view','platform.admin'))`).bind(userId, entityKey);
+}
+
+export async function canReceiveNotification(
+  env: Env,
+  userId: number,
+  entityType: NotificationEntity,
+  entityKey: string,
+) {
+  const access = await notificationAccessStatement(env, userId, entityType, entityKey).first<{
+    allowed: number;
+  }>();
   return Boolean(access?.allowed);
 }
 
@@ -263,12 +311,38 @@ export function taskNotificationOutboxStatement(
 }
 
 export async function sendUserNotification(env: Env, notification: UserNotification) {
+  const prepared = await prepareNotification(env, notification);
+  return typeof prepared === 'function' ? prepared() : prepared;
+}
+
+// Scheduled runners admit the complete cohort before any network sends.
+export async function prepareScheduledEmail(
+  env: Env,
+  notification: UserNotification,
+  frequency: DigestFrequency,
+  dispatchAt: number,
+) {
+  const prepared = await prepareNotification(env, notification, frequency, dispatchAt);
+  return typeof prepared === 'function' ? prepared : undefined;
+}
+
+async function prepareNotification(
+  env: Env,
+  notification: UserNotification,
+  digestFrequency?: DigestFrequency,
+  dispatchAt?: number,
+) {
   if (notification.userId === notification.actorUserId) {
     return { status: 'skipped' as const };
   }
   if (
-    notification.entityType === 'task' &&
-    !(await canReceiveTaskNotification(env, notification.userId, notification.entityKey))
+    !digestFrequency &&
+    !(await canReceiveNotification(
+      env,
+      notification.userId,
+      notification.entityType,
+      notification.entityKey,
+    ))
   ) {
     return { status: 'skipped' as const };
   }
@@ -353,6 +427,15 @@ export async function sendUserNotification(env: Env, notification: UserNotificat
     return { status: 'skipped' as const, outboxReserved };
   }
 
+  if (!digestFrequency) {
+    const frequency = await emailFrequencyFor(env, notification.userId, notification.kind);
+    if (frequency === 'off') return { status: 'skipped' as const, outboxReserved };
+    if (frequency !== 'immediate') {
+      await aggregateDigest(env, notification, frequency);
+      return { status: 'aggregated' as const, outboxReserved };
+    }
+  }
+
   const reserved = await env.DB.prepare(
     `INSERT OR IGNORE INTO notification_deliveries
        (dedupe_key, user_id, kind, entity_type, entity_key)
@@ -366,76 +449,90 @@ export async function sendUserNotification(env: Env, notification: UserNotificat
       notification.entityKey,
     )
     .run();
-  if (!reserved.meta.changes) {
-    const existing = await env.DB.prepare(
-      'SELECT status FROM notification_deliveries WHERE dedupe_key = ?',
-    )
-      .bind(notification.dedupeKey)
-      .first<{ status: string }>();
-    if (existing?.status === 'accepted') return { status: 'duplicate' as const };
-    await env.DB.prepare(
-      `UPDATE notification_deliveries SET status = 'pending', error_code = NULL,
-       updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE dedupe_key = ?`,
-    )
+  // The insert owner is the only sender. Failed, skipped, and interrupted sends are terminal.
+  if (!reserved.meta.changes) return { status: 'duplicate' as const };
+  if (!(await reserveEmailQuota(env, notification.userId, notification.dedupeKey, dispatchAt))) {
+    await env.DB.prepare(`UPDATE notification_deliveries SET status = 'skipped', error_code = 'quota_suppressed',
+      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE dedupe_key = ?`)
       .bind(notification.dedupeKey)
       .run();
+    return { status: 'suppressed' as const };
   }
 
-  const body = JSON.stringify(
-    notificationPayload({
-      from: env.EMAIL_FROM ?? '',
-      to: user.email,
-      recipientName: user.name,
-      subject: notification.subject,
-      heading: notification.heading,
-      message: notification.message,
-      url: notification.url,
-      ...(notification.details ? { details: notification.details } : {}),
-    }),
-  );
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const headerPrefix = tenantExtensions().integrations?.emailGateway?.headerPrefix ?? 'X-Tasks';
-  const path = '/v1/email';
-  const requestId = `tasks-${(await sha256(notification.dedupeKey)).slice(0, 48)}`;
-  const bodyDigest = await sha256(body);
-  const canonical = `${timestamp}\nPOST\n${path}\n${requestId}\n${bodyDigest}`;
-  const signature = await emailRequestSignature(env.EMAIL_API_SECRET ?? '', canonical);
-  try {
-    const response = await fetch(new URL(path, env.EMAIL_API_ENDPOINT).toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        [`${headerPrefix}-Client`]: env.EMAIL_API_CLIENT_ID ?? '',
-        [`${headerPrefix}-Timestamp`]: timestamp,
-        [`${headerPrefix}-Signature`]: `v1=${signature}`,
-        'Idempotency-Key': requestId,
-      },
-      body,
-      signal: AbortSignal.timeout(10_000),
-    });
-    const result = (await response.json().catch(() => ({}))) as { error?: string };
-    await env.DB.prepare(
-      `UPDATE notification_deliveries SET email_request_id = ?, status = ?, error_code = ?,
+  // Immediate and scheduled sends share this single-use boundary. No asynchronous work
+  // may occur between the final lease check and starting the gateway request.
+  const preparedAt = performance.now();
+  return async () => {
+    const body = JSON.stringify(
+      notificationPayload({
+        from: env.EMAIL_FROM ?? '',
+        to: user.email,
+        recipientName: user.name,
+        subject: notification.subject,
+        heading: notification.heading,
+        message: notification.message,
+        url: notification.url,
+        ...(notification.details ? { details: notification.details } : {}),
+      }),
+    );
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const headerPrefix = tenantExtensions().integrations?.emailGateway?.headerPrefix ?? 'X-Tasks';
+    const path = '/v1/email';
+    const requestId = `tasks-${(await sha256(notification.dedupeKey)).slice(0, 48)}`;
+    const bodyDigest = await sha256(body);
+    const canonical = `${timestamp}\nPOST\n${path}\n${requestId}\n${bodyDigest}`;
+    const signature = await emailRequestSignature(env.EMAIL_API_SECRET ?? '', canonical);
+    const claimStartedAt = performance.now();
+    const claimed = await claimEmailSend(env, notification.dedupeKey, dispatchAt);
+    if (
+      !claimed ||
+      performance.now() - claimStartedAt >= emailSendLeaseMs ||
+      performance.now() - preparedAt >= 60_000 ||
+      (dispatchAt !== undefined && Date.now() >= (dispatchAt + 60) * 1000)
+    ) {
+      await env.DB.prepare(`UPDATE notification_deliveries SET status = 'skipped', error_code = 'dispatch_expired',
+        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE dedupe_key = ?`)
+        .bind(notification.dedupeKey)
+        .run();
+      return { status: 'suppressed' as const };
+    }
+    try {
+      const response = await fetch(new URL(path, env.EMAIL_API_ENDPOINT).toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [`${headerPrefix}-Client`]: env.EMAIL_API_CLIENT_ID ?? '',
+          [`${headerPrefix}-Timestamp`]: timestamp,
+          [`${headerPrefix}-Signature`]: `v1=${signature}`,
+          'Idempotency-Key': requestId,
+        },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      await env.DB.prepare(
+        `UPDATE notification_deliveries SET email_request_id = ?, status = ?, error_code = ?,
        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE dedupe_key = ?`,
-    )
-      .bind(
-        requestId,
-        response.ok ? 'accepted' : 'failed',
-        response.ok ? null : (result.error ?? `http_${response.status}`),
-        notification.dedupeKey,
       )
-      .run();
-    return { status: response.ok ? ('accepted' as const) : ('failed' as const), requestId };
-  } catch (error) {
-    const code = error instanceof Error ? error.name.slice(0, 100) : 'request_failed';
-    await env.DB.prepare(
-      `UPDATE notification_deliveries SET email_request_id = ?, status = 'failed', error_code = ?,
+        .bind(
+          requestId,
+          response.ok ? 'accepted' : 'failed',
+          response.ok ? null : (result.error ?? `http_${response.status}`),
+          notification.dedupeKey,
+        )
+        .run();
+      return { status: response.ok ? ('accepted' as const) : ('failed' as const), requestId };
+    } catch (error) {
+      const code = error instanceof Error ? error.name.slice(0, 100) : 'request_failed';
+      await env.DB.prepare(
+        `UPDATE notification_deliveries SET email_request_id = ?, status = 'failed', error_code = ?,
        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE dedupe_key = ?`,
-    )
-      .bind(requestId, code, notification.dedupeKey)
-      .run();
-    return { status: 'failed' as const, requestId };
-  }
+      )
+        .bind(requestId, code, notification.dedupeKey)
+        .run();
+      return { status: 'failed' as const, requestId };
+    }
+  };
 }
 
 export function taskUrl(env: Env, taskKey: string) {

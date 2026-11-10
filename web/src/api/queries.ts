@@ -63,6 +63,7 @@ export function useUpdateAccountPreferences() {
   return useMutation({
     mutationFn: (preferences: AccountPreferences) => api.updateAccountPreferences(preferences),
     onSuccess: (preferences) => {
+      void client.invalidateQueries({ queryKey: ['email-preferences'] });
       client.setQueryData<Bootstrap>(keys.bootstrap, (bootstrap) =>
         bootstrap?.user
           ? {
@@ -666,6 +667,23 @@ export function useEventResponsibilityMutation(eventKey: string) {
       void client.invalidateQueries({ queryKey: keys.event(eventKey) });
       void client.invalidateQueries({ queryKey: ['events'] });
       void client.invalidateQueries({ queryKey: ['event-work-items'] });
+    },
+  });
+}
+
+export function useEmailPreferences(enabled: boolean) {
+  return useQuery({ queryKey: ['email-preferences'], queryFn: api.emailPreferences, enabled });
+}
+export function useEmailSettings(enabled: boolean) {
+  return useQuery({ queryKey: ['email-settings'], queryFn: api.emailSettings, enabled });
+}
+export function useUpdateEmailSettings() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: api.updateEmailSettings,
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['email-settings'] });
+      void client.invalidateQueries({ queryKey: ['email-preferences'] });
     },
   });
 }

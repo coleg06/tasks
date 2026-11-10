@@ -68,7 +68,7 @@ export class SessionIdentityProvider implements IdentityProvider<SessionIdentity
       const user = await this.env.DB.prepare('SELECT id, email, status FROM users WHERE id = ?')
         .bind(Number(session.sub))
         .first<{ id: number; email: string; status: string }>();
-      if (user?.status !== 'active') return null;
+      if (user?.status !== 'active' || user.email !== session.email) return null;
       if (!(await impersonationStillAuthorized(this.env, session, user.id))) return null;
       const actorId = session.act ? Number(session.act.sub) : user.id;
       const taskIdentity: TaskIdentity = {
