@@ -15,7 +15,7 @@ export type TasksSearch = {
   hideAgent?: '1' | undefined;
 };
 
-const views: TaskView[] = ['open', 'mine', 'backlog', 'completed'];
+const views: TaskView[] = ['open', 'mine', 'backlog', 'completed', 'all'];
 
 function text(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : undefined;

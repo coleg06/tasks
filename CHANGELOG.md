@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.11.0 (unreleased)
+## 1.12.0
+
+- Add an "All tasks" view below Completed that lists tasks of every status with the same
+  access rules, ordering and 500-result cap as the other views.
+- Replace the People filters' native dropdowns with the application's standard dropdown
+  menus, matching every other filter and keeping the same status and role semantics. Each
+  menu button's accessible name includes its current value.
+
+## 1.11.0
 
 - Bound preferences dialog height and scrolling in desktop and mobile browsers.
 - Add per-category email frequencies, personal limits and an atomic deployment email cap.

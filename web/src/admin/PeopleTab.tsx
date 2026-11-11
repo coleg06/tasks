@@ -120,7 +120,20 @@ export function PeopleTab({
   const assignableRoles = roles.filter((entry) => entry.assignable);
   const roleOptions = (list: typeof roles) =>
     list.map((entry) => ({ value: entry.key, label: entry.label, hint: entry.description }));
+  const statusFilterOptions = [
+    { value: '', label: 'Any status' },
+    { value: 'active', label: 'Active' },
+    { value: 'disabled', label: 'Disabled' },
+  ];
+  const roleFilterOptions = [
+    { value: '', label: 'Any role' },
+    ...roles.map((entry) => ({ value: entry.key, label: entry.label })),
+  ];
   const filtered = Boolean(debouncedSearch || status || role);
+  // Name the trigger with its current value, as a native select would announce it.
+  const statusLabel =
+    statusFilterOptions.find((option) => option.value === status)?.label ?? 'Any status';
+  const roleLabel = roleFilterOptions.find((option) => option.value === role)?.label ?? 'Any role';
 
   return (
     <section aria-label="People" className="admin-people">
@@ -135,27 +148,22 @@ export function PeopleTab({
             value={search}
           />
         </label>
-        <select
-          aria-label="Filter by status"
-          onChange={(event) => setStatus(event.target.value as DirectoryFilters['status'])}
+        <ActionMenu
+          ariaLabel={`Filter by status: ${statusLabel}`}
+          onSelect={(value) => setStatus(value as DirectoryFilters['status'])}
+          options={statusFilterOptions}
           value={status}
         >
-          <option value="">Any status</option>
-          <option value="active">Active</option>
-          <option value="disabled">Disabled</option>
-        </select>
-        <select
-          aria-label="Filter by role"
-          onChange={(event) => setRole(event.target.value)}
+          Status: {statusLabel}
+        </ActionMenu>
+        <ActionMenu
+          ariaLabel={`Filter by role: ${roleLabel}`}
+          onSelect={setRole}
+          options={roleFilterOptions}
           value={role}
         >
-          <option value="">Any role</option>
-          {roles.map((entry) => (
-            <option key={entry.key} value={entry.key}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
+          Role: {roleLabel}
+        </ActionMenu>
         <button className="button-primary" onClick={() => setInviteOpen(true)} type="button">
           <UserPlus aria-hidden="true" /> Invite people
         </button>

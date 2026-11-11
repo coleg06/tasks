@@ -349,14 +349,17 @@ async function portableTasks(filters: {
   if (filters.view === 'mine') parameters.set('assignee', 'me');
   if (filters.hideAgent) parameters.set('excludeAssigneeKind', 'agent');
   const completed = new Set(['done', 'cancelled']);
+  // The all view asks for every status, so it sends no status filter at all.
   const statuses =
-    filters.view === 'completed'
-      ? tenantProfile.tasks.workflow.filter((status) => completed.has(status))
-      : filters.view === 'backlog'
-        ? tenantProfile.tasks.workflow.filter((status) =>
-            ['backlog', 'not_started', 'open'].includes(status),
-          )
-        : tenantProfile.tasks.workflow.filter((status) => !completed.has(status));
+    filters.view === 'all'
+      ? []
+      : filters.view === 'completed'
+        ? tenantProfile.tasks.workflow.filter((status) => completed.has(status))
+        : filters.view === 'backlog'
+          ? tenantProfile.tasks.workflow.filter((status) =>
+              ['backlog', 'not_started', 'open'].includes(status),
+            )
+          : tenantProfile.tasks.workflow.filter((status) => !completed.has(status));
   if (statuses.length) parameters.set('status', statuses.join(','));
 
   const tasks: TaskSummary[] = [];

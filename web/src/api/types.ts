@@ -13,7 +13,7 @@ import { tenantProfile } from '../../../shared/tenant-profile';
 export type TaskStatus = TaskWorkflowState;
 export type TaskPriority = PortableTaskPriority;
 export type TaskEffort = PortableTaskEffort;
-export type TaskView = 'open' | 'mine' | 'backlog' | 'completed';
+export type TaskView = 'open' | 'mine' | 'backlog' | 'completed' | 'all';
 
 export type Identity = {
   id: number;
@@ -174,6 +174,7 @@ export const viewLabels: Record<TaskView, string> = {
   mine: 'My Tasks',
   backlog: 'Backlog',
   completed: 'Completed',
+  all: 'All tasks',
 };
 
 export type AdminUser = {

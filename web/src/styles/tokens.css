@@ -2823,7 +2823,6 @@ tr:first-child > .preferences-cell {
   gap: var(--space-2);
 }
 
-.admin-toolbar select,
 .admin-audit-filters input,
 .admin-audit-filters select,
 .admin-bulk-list textarea,
@@ -2841,6 +2840,11 @@ tr:first-child > .preferences-cell {
 .admin-toolbar .button-primary {
   height: 34px;
   margin-left: auto;
+}
+
+/* Filter dropdowns line up with the toolbar's other controls. */
+.admin-toolbar .button-quiet {
+  height: 34px;
 }
 
 .admin-search {
@@ -3532,7 +3536,7 @@ tr:first-child > .preferences-cell {
     flex-basis: 100%;
   }
 
-  .admin-toolbar select {
+  .admin-toolbar .button-quiet {
     flex: 1;
   }
 

@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronsUpDown,
   Folder,
+  List,
   ListTodo,
   LockKeyhole,
   LogOut,
@@ -34,6 +35,7 @@ const viewIcons: Record<TaskView, typeof ListTodo> = {
   mine: UserRound,
   backlog: Archive,
   completed: CheckCircle2,
+  all: List,
 };
 
 export function Sidebar() {

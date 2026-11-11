@@ -15,6 +15,18 @@ describe('task views', () => {
     });
   });
 
+  it('leaves the all view with no status predicate', () => {
+    expect(taskViewFilter('all')).toEqual({
+      sql: '1=1',
+      assignedToCurrentUser: false,
+    });
+    expect(taskViewFilter('all').sql).not.toContain('t.status');
+  });
+
+  it('accepts the all view as a known view name', () => {
+    expect(normalizeTaskView('all')).toBe('all');
+  });
+
   it('falls back to All Open Tasks for unknown view names', () => {
     expect(normalizeTaskView('unexpected')).toBe('open');
   });

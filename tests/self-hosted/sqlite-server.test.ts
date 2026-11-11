@@ -178,6 +178,21 @@ describe.skipIf(!legacy)(
         'Self-hosted round trip (edited)',
       );
 
+      // The all view carries every status; an unknown view falls back to open.
+      const every = (await (
+        await fetch(`${base}/api/tasks?view=all`, { headers: headers() })
+      ).json()) as { tasks: { key: string }[]; view: string };
+      expect(every.view).toBe('all');
+      expect(every.tasks.map((entry) => entry.key)).toContain(task.key);
+      const open = (await (
+        await fetch(`${base}/api/tasks?view=open`, { headers: headers() })
+      ).json()) as { tasks: { key: string }[] };
+      expect(open.tasks.map((entry) => entry.key)).not.toContain(task.key);
+      const fallback = (await (
+        await fetch(`${base}/api/tasks?view=nonsense`, { headers: headers() })
+      ).json()) as { view: string };
+      expect(fallback.view).toBe('open');
+
       const searched = (await (
         await fetch(`${base}/api/tasks?view=backlog&search=edited`, { headers: headers() })
       ).json()) as { tasks: { key: string }[] };

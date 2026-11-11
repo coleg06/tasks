@@ -6,8 +6,12 @@ describe('task search params', () => {
     expect(validateSearch({})).toEqual({ view: 'open' });
   });
 
-  it('rejects a view that is not one of the four', () => {
+  it('rejects a view that is not one of the five', () => {
     expect(validateSearch({ view: 'archived' })).toEqual({ view: 'open' });
+  });
+
+  it('keeps the all view, which lists every status', () => {
+    expect(validateSearch({ view: 'all' })).toEqual({ view: 'all' });
   });
 
   it('carries project, query and the open task through', () => {

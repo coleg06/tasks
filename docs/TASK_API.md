@@ -60,7 +60,7 @@ sets; the CSRF cookie and `Origin` rules are the same.)
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/bootstrap` | Current user, permissions, enabled features |
-| `GET /api/tasks?view=&q=&project=&sort=&hideAgent=1` | List tasks. `view` is `open` (default; in progress or blocked), `mine`, `backlog` or `completed`. `q` is a case-insensitive substring match on title and description (at most 120 characters). Up to 500 results. |
+| `GET /api/tasks?view=&q=&project=&sort=&hideAgent=1` | List tasks. `view` is `open` (default; in progress or blocked), `mine`, `backlog`, `completed` or `all` (every status). `q` is a case-insensitive substring match on title and description (at most 120 characters). Up to 500 results; a view that holds more returns the first 500 by the sort order, the same for every view. |
 | `POST /api/tasks` | Create. An optional `mutationKey` (UUID) makes the create idempotent. Returns 201 with the task. |
 | `GET /api/tasks/:taskKey` | The task plus `comments`, `activity` (its history), `canEdit` and `canComment` |
 | `PATCH /api/tasks/:taskKey` | Update any subset of the fields above. Send `If-Match: "<version>"` to fail with 409 `version_conflict` (and the current task) when someone else changed it first. Without the header the update applies to the version just read and still cannot overwrite a concurrent write. |
