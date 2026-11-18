@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "exportFormat": "reviewed-unrelated-history-snapshot",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "source": {
-    "commit": "7c6ecbe2266fdfccc2209dabff6526a664c31d8c",
-    "tree": "a193f2f45e80750d7747f2fa64c6cd6527d068d2"
+    "commit": "b36fe1a5be4a7eeb45b62b4c8b3cbf3c8aa73e3c",
+    "tree": "bcb4f0ab27abb2fd1f5df252f8dd3519315d3f91"
   }
 }

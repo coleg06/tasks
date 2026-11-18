@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { tenantProfile } from '../../shared/tenant-profile';
+import { isUniqueViolation } from '../admin/rbac';
 import type { TaskAppEnv, TaskIdentity } from '../app-env';
 import type { TaskAccessContext } from '../core/contracts';
 import { requireTasksSession } from '../identity/context';
@@ -156,7 +157,10 @@ export async function listProjects(context: AppContext) {
   const identity = await requireTasksSession(context);
   if (!identity) return context.json({ error: 'unauthorized' }, 401);
   const projects = await taskReadBackend(context).listProjectsForApi(taskAccessContext(identity));
-  return context.json({ projects });
+  return context.json({
+    projects,
+    capabilities: { explicitKeys: true, configuredAgentMembership: true },
+  });
 }
 
 export async function createProject(context: AppContext) {
@@ -166,12 +170,18 @@ export async function createProject(context: AppContext) {
     name?: unknown;
     description?: unknown;
     visibility?: unknown;
+    key?: unknown;
   }>();
   const name = typeof input.name === 'string' ? input.name.trim().slice(0, 80) : '';
   const description =
     typeof input.description === 'string' ? input.description.trim().slice(0, 500) : '';
   const visibility = input.visibility === 'private' ? 'private' : 'workspace';
   if (!name) return context.json({ error: 'name_required' }, 400);
+  if (
+    input.key !== undefined &&
+    (typeof input.key !== 'string' || !/^[A-Z][A-Z0-9_-]{1,39}$/.test(input.key))
+  )
+    return context.json({ error: 'invalid_project_key' }, 400);
   const workspace = await context.env.DB.prepare(
     `SELECT w.id FROM workspaces w
      JOIN workspace_members wm ON wm.workspace_id = w.id
@@ -190,22 +200,30 @@ export async function createProject(context: AppContext) {
       .join('')
       .slice(0, 4)
       .toUpperCase() || 'PRJ';
-  const projectKey = `${prefix}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
-  await context.env.DB.batch([
-    context.env.DB.prepare(
-      `INSERT INTO projects (
+  const projectKey =
+    typeof input.key === 'string'
+      ? input.key
+      : `${prefix}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
+  try {
+    await context.env.DB.batch([
+      context.env.DB.prepare(
+        `INSERT INTO projects (
         workspace_id, project_key, name, description, visibility, created_by_user_id
        ) VALUES (?, ?, ?, ?, ?, ?)`,
-    ).bind(workspace.id, projectKey, name, description, visibility, identity.user.id),
-    context.env.DB.prepare(
-      `INSERT INTO project_members (project_id, user_id, role)
+      ).bind(workspace.id, projectKey, name, description, visibility, identity.user.id),
+      context.env.DB.prepare(
+        `INSERT INTO project_members (project_id, user_id, role)
        SELECT id, ?, 'owner' FROM projects WHERE project_key = ?`,
-    ).bind(identity.user.id, projectKey),
-    auditStatement(context, identity.auditUserId, 'project', projectKey, 'project.created', {
-      name,
-      visibility,
-    }),
-  ]);
+      ).bind(identity.user.id, projectKey),
+      auditStatement(context, identity.auditUserId, 'project', projectKey, 'project.created', {
+        name,
+        visibility,
+      }),
+    ]);
+  } catch (error) {
+    if (isUniqueViolation(error)) return context.json({ error: 'project_key_exists' }, 409);
+    throw error;
+  }
   return context.json({ project: { key: projectKey, name, description, visibility } }, 201);
 }
 
@@ -290,7 +308,17 @@ export async function upsertProjectMember(context: AppContext) {
   const input = await context.req.json<{ email?: unknown; role?: unknown }>();
   const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
   const role = input.role === 'editor' || input.role === 'owner' ? input.role : 'viewer';
-  if (!isHostedEmail(context.env, email)) {
+  // Only the already provisioned tenant agent may be outside the hosted human domain.
+  // This path never creates an agent or accepts an arbitrary external principal.
+  const existingAgent =
+    tenantProfile.agent.enabled && email === tenantProfile.agent.email.toLowerCase()
+      ? await context.env.DB.prepare(
+          "SELECT id FROM users WHERE email = ? COLLATE NOCASE AND principal_type = 'agent' AND status = 'active'",
+        )
+          .bind(email)
+          .first<{ id: number }>()
+      : null;
+  if (!existingAgent && !isHostedEmail(context.env, email)) {
     return context.json({ error: 'hosted_email_required' }, 400);
   }
   const project = await context.env.DB.prepare(
@@ -314,12 +342,13 @@ export async function upsertProjectMember(context: AppContext) {
     return context.json({ error: 'personal_project_locked' }, 403);
   }
   const firstName = email.split('@')[0] ?? email;
-  await context.env.DB.prepare(
-    `INSERT INTO users (email, first_name) VALUES (?, ?)
+  if (!existingAgent)
+    await context.env.DB.prepare(
+      `INSERT INTO users (email, first_name) VALUES (?, ?)
      ON CONFLICT(email) DO UPDATE SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')`,
-  )
-    .bind(email, firstName)
-    .run();
+    )
+      .bind(email, firstName)
+      .run();
   const user = await context.env.DB.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE')
     .bind(email)
     .first<{ id: number }>();

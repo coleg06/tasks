@@ -42,6 +42,16 @@ export type TenantProfileExtensions = {
       /** A fixed lane, or the deployment's ENVIRONMENT binding for multi-lane builds. */
       environment: 'dev' | 'production' | 'deployment';
     };
+    /** Inbound facility requests. Absent: the endpoint answers 503. */
+    portalFacility?: {
+      campusLabels?: Readonly<Record<string, string>>;
+      /** May instead be supplied by PORTAL_FACILITY_PROJECT_KEY; no cross-project fallback. */
+      projectKey?: string;
+      /** May instead be supplied by PORTAL_FACILITY_ASSIGNEE_EMAIL. */
+      assigneeEmail?: string;
+      actorEmail: string;
+      environment: 'dev' | 'production' | 'deployment';
+    };
     /** Event-intake assistant. Absent: no model endpoint is accepted. */
     eventAssist?: {
       /** Hostnames of the model endpoint EVENT_AI_ENDPOINT may point at. */

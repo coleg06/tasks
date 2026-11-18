@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.12.1
+
+- Ship Terraform 1.17.2 alongside OpenTofu 1.12.1 for a staged provider-address migration.
+- Add reusable local-state rehearsal and guarded state migration tooling.
+
 ## 1.12.0
 
 - Add an "All tasks" view below Completed that lists tasks of every status with the same

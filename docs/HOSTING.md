@@ -189,6 +189,7 @@ agents can list, search, read, create, update and comment on tasks. It is **off 
 | `TASKS_MCP_CREDENTIALS_JSON` | The credential registry (below). A secret. |
 | `TASKS_MCP_AUTH_MODE` | `gateway-and-token` (default) or `token`. |
 | `TASKS_MCP_GATEWAY_SECRET` | At least 32 characters. Required by `gateway-and-token` only. |
+| `TASKS_MCP_RATE_OBSERVE` | `true`: log a `mcp.rate_observed` warning the first time, in a one-minute window, that one MCP client passes `TASKS_MCP_RATE_OBSERVE_CLIENT_REQUESTS` requests (default 600) or the server passes `TASKS_MCP_RATE_OBSERVE_FAILED_AUTH` rejected client credentials (default 30). Observation only: no request is ever refused. Counters are in memory per process, so they undercount across replicas. Off unless set. |
 
 With `TASKS_MCP_ENABLED=true`, a missing or invalid setting keeps `/mcp` answering 503
 `{"error":"not_configured"}`. Under `ENVIRONMENT=production` startup exits non-zero and names the
@@ -411,3 +412,45 @@ The response `task.url` uses `/r/portal-design-request/{submission_uuid}`. Route
 Worker before SPA assets. That stable URL uses the existing session sign-in/return path, redirects
 authorized viewers to the normal task detail, and gives authorized project members a no-store
 pending page until creation. Inaccessible or malformed requests share a generic not-found page.
+
+
+### Optional facility-request ingestion
+
+Legacy SQL deployments may opt in with `integrations.portalFacility`: `actorEmail`, `environment`
+(`dev`, `production`, or `deployment`), optional `campusLabels`, `projectKey` and `assigneeEmail`.
+`PORTAL_FACILITY_PROJECT_KEY` and `PORTAL_FACILITY_ASSIGNEE_EMAIL` override the profile routing when
+set. There is no fallback to the design project. Use the existing `PORTAL_DESIGN_INGEST_SECRET`
+binding (at least 32 characters); no additional secret is needed. Missing profile/secret/routing
+returns 503, invalid Bearer credentials return 401. Authenticated routing errors identify the
+configuration fields; dependency errors explain the required access.
+
+`POST /api/integrations/portal/facility-requests` mirrors design ingestion's strict JSON v1 envelope
+(`version`, `environment`, `submission_id`, `submitted_at`, `requester: {name,email}`, `locale`,
+`campus`, `reference_files`). Answers are `request_type`, `urgency`, `location`, `description`,
+`needed_by` (calendar date, empty or omitted), and `event_name` (empty when absent). Request type and
+urgency must match the canonical English facility form selections, including for Spanish requests.
+Location is nonblank and at most 160 characters, description is nonblank and at most 20,000,
+and event name is at most 320. Up to three PDF/PNG/JPEG metadata entries may total 3 MiB.
+The whole request is bounded at 128 KiB, including when Content-Length is absent or inaccurate.
+
+Tasks use `Facility request: <request_type> - <location>`, all answers and requester details in the
+description, the optional deadline, and high priority when urgency starts with `Urgent` (otherwise
+medium). Full overflow text remains in Imported details. Files stay in the originating email.
+The configured active agent and assignee require workspace membership, editor/owner project
+membership and `tasks.view`; the destination must be an active private shared project in the
+profile workspace and matching deployment lane. Missing dependencies fail closed with 503.
+
+`GET /api/integrations/portal/facility-requests/health` uses the same bearer secret and returns
+`{"ok":true}` only when ready, without writing. Separate facility source UUID receipts preserve
+design's atomic create/audit behavior, 201 create, 200 identical replay, 409 changed payload,
+400 malformed input, and preservation of human edits. `task.url` is the stable session-protected
+`/r/portal-facility-request/{submission_uuid}` with the same private redirect/pending behavior.
+
+`GET /api/projects` advertises `capabilities.explicitKeys` and
+`capabilities.configuredAgentMembership` so provisioners can fail before writes against older bases.
+For declarative provisioning, authorized task managers may supply `key` to `POST /api/projects`:
+2–40 characters, starting with an uppercase letter, then uppercase letters, digits, underscores or
+hyphens. Existing keys return 409 without changes; omitted keys retain generated names. The
+membership API also accepts the already-active configured tenant Agent principal outside the
+human hosted domain. It never creates external agent identities. Both operations retain their
+normal authorization and audit requirements.

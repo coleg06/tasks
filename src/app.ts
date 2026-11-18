@@ -94,10 +94,17 @@ import {
   portalDesignHealth,
   redirectPortalDesignRequest,
 } from './integrations/portal-design';
+import {
+  ingestPortalFacilityRequest,
+  PORTAL_FACILITY_MAX_BYTES,
+  portalFacilityHealth,
+  redirectPortalFacilityRequest,
+} from './integrations/portal-facility';
 import { ingestPortalSupportTicket, portalSupportHealth } from './integrations/portal-support';
 import { logApplicationError, logUnhandledError, requestLogger } from './logging';
 import { authenticateMcpRequest, McpAuthenticationError, mcpAuthErrorResponse } from './mcp/auth';
 import { mcpAvailability, mcpConfigurationProblems } from './mcp/config';
+import { observeMcpClientRequest, observeMcpFailedAuth } from './mcp/rate-observer';
 import { createMcpApiCaller, createTasksMcpHandler } from './mcp/server';
 import {
   GatewayAssertionError,
@@ -151,6 +158,13 @@ app.use(
   '/api/integrations/portal/design-requests',
   bodyLimit({
     maxSize: PORTAL_DESIGN_MAX_BYTES,
+    onError: (context) => context.json({ error: 'payload_too_large' }, 400),
+  }),
+);
+app.use(
+  '/api/integrations/portal/facility-requests',
+  bodyLimit({
+    maxSize: PORTAL_FACILITY_MAX_BYTES,
     onError: (context) => context.json({ error: 'payload_too_large' }, 400),
   }),
 );
@@ -330,6 +344,7 @@ app.use('/api/agent/v1/*', async (context, next) => {
   if (!tenantProfile.agent.enabled) return context.json({ error: 'not_found' }, 404);
   try {
     const client = await authenticateMcpRequest(context.req.raw, context.env);
+    observeMcpClientRequest(context.env, client.clientId);
     // Credential scope is otherwise enforced only by the /mcp tool layer; apply it
     // to the HTTP surface too so a read-only credential cannot mutate directly.
     if (!['GET', 'HEAD'].includes(context.req.method) && client.scope !== 'read_write') {
@@ -357,7 +372,10 @@ app.use('/api/agent/v1/*', async (context, next) => {
     context.set('mcpClient', client);
     await next();
   } catch (error) {
-    if (error instanceof McpAuthenticationError) return mcpAuthErrorResponse(error);
+    if (error instanceof McpAuthenticationError) {
+      if (error.code === 'client_rejected') observeMcpFailedAuth(context.env);
+      return mcpAuthErrorResponse(error);
+    }
     await logApplicationError(
       'mcp.agent_auth_rejected',
       error,
@@ -444,6 +462,7 @@ app.all('/mcp', async (context) => {
   if (!tenantProfile.agent.enabled) return context.json({ error: 'not_found' }, 404);
   try {
     const client = await authenticateMcpRequest(context.req.raw, context.env);
+    observeMcpClientRequest(context.env, client.clientId);
     const callApi = createMcpApiCaller(
       (input, init) => app.request(input, init, context.env, context.executionCtx),
       context.req.raw,
@@ -463,7 +482,10 @@ app.all('/mcp', async (context) => {
       },
     });
   } catch (error) {
-    if (error instanceof McpAuthenticationError) return mcpAuthErrorResponse(error);
+    if (error instanceof McpAuthenticationError) {
+      if (error.code === 'client_rejected') observeMcpFailedAuth(context.env);
+      return mcpAuthErrorResponse(error);
+    }
     await logApplicationError('mcp.request_failed', error, context.env, context.get('requestId'));
     return context.json({ error: 'mcp_request_failed' }, 500);
   }
@@ -472,6 +494,9 @@ app.all('/mcp', async (context) => {
 app.get('/api/integrations/portal/design-requests/health', portalDesignHealth);
 app.post('/api/integrations/portal/design-requests', ingestPortalDesignRequest);
 app.get('/r/portal-design-request/:submissionId', redirectPortalDesignRequest);
+app.get('/api/integrations/portal/facility-requests/health', portalFacilityHealth);
+app.post('/api/integrations/portal/facility-requests', ingestPortalFacilityRequest);
+app.get('/r/portal-facility-request/:submissionId', redirectPortalFacilityRequest);
 app.post('/api/telemetry/client-error', recordClientError);
 app.route('/api/task-service/v1', taskServiceApi);
 if (tenantProfile.capabilities.portalSupport) {

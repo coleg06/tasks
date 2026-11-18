@@ -27,7 +27,10 @@ export interface Env {
   GOOGLE_DRIVE_PRIVATE_KEY?: string;
   GOOGLE_DRIVE_ROOT_FOLDER_ID?: string;
   GOOGLE_DRIVE_SHARED_DRIVE_ID?: string;
+  /** Shared bearer credential for Portal design and facility ingestion. */
   PORTAL_DESIGN_INGEST_SECRET?: string;
+  PORTAL_FACILITY_PROJECT_KEY?: string;
+  PORTAL_FACILITY_ASSIGNEE_EMAIL?: string;
   PORTAL_SUPPORT_INGEST_SECRET?: string;
   RELEASE_SHA: string;
   TASKS_GATEWAY_ASSERTION_SECRET?: string;
@@ -37,6 +40,12 @@ export interface Env {
   TASKS_MCP_AUTH_MODE?: string;
   TASKS_MCP_CREDENTIALS_JSON?: string;
   TASKS_MCP_GATEWAY_SECRET?: string;
+  /** `true`: log (never enforce) MCP request rates. Off unless set. See `src/mcp/rate-observer.ts`. */
+  TASKS_MCP_RATE_OBSERVE?: string;
+  /** Observe mode: requests per MCP client per minute before a warning. Default 600. */
+  TASKS_MCP_RATE_OBSERVE_CLIENT_REQUESTS?: string;
+  /** Observe mode: rejected client credentials per minute before a warning. Default 30. */
+  TASKS_MCP_RATE_OBSERVE_FAILED_AUTH?: string;
   TASK_ALERT_PUBLISHER_SECRET?: string;
   SESSION_SECRET?: string;
   /** Restrict sign-in and invitations to this email domain. No default (any domain). */
