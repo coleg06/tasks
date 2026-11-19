@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.13.0
+
+- Standardize the tenant build base on Terraform 1.17.2 and remove the OpenTofu binary.
+- Reject legacy CLI selection; dual-engine rehearsals use immutable 1.12.1 tooling.
+
 ## 1.12.1
 
 - Ship Terraform 1.17.2 alongside OpenTofu 1.12.1 for a staged provider-address migration.
